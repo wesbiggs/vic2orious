@@ -9,8 +9,8 @@ the machine back afterwards. It is ca65 source:
 
 It doesn't need `v2t.inc`. To draw text beside the image, include both: `v2t.inc`'s
 defaults match v2i's screen layout ([v2t-lib.md](v2t-lib.md)). `asm/v2i-demo.s` is the
-smallest complete program. `asm/slideshow.s`, `asm/viewer.s` and `asm/ask.s` use both
-libraries.
+smallest complete program. `asm/slideshow.s`, `asm/diskshow.s`, `asm/viewer.s` and
+`asm/ask.s` use both libraries.
 
 Zero page: `$02` (used by the kernels; can't be moved) and `V2I_ZP_SIZE` = 13 bytes from
 `V2I_ZP`, default `$10`. Define `V2I_ZP` before the include to move them.

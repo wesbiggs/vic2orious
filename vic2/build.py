@@ -1,7 +1,13 @@
 """Convert images to .v2i files, assemble the slideshow, viewer and demos, build a D64
 and optionally verify in VICE.
 
-usage: python3 -m vic2.build [-b] [--at COLUMN,ROW] [--verify] [--run] [images...]
+usage: python3 -m vic2.build [-b] [--at COLUMN,ROW] [--disk d64|d81] [--convert-only]
+                             [--force] [--verify] [--run] [images...]
+
+Each image is converted once: build/<name>.json records what the conversion depended on,
+and later builds reuse the .v2i while that is unchanged (--force converts anyway).
+--convert-only converts and builds nothing else; the Makefile uses it to convert images one
+by one (make -j converts them in parallel).
 
 File formats: docs/v2i-format.md (.v2i images) and docs/v2t-format.md (.v2t text and the
 font). The C64 libraries that use them: docs/v2i-lib.md and docs/v2t-lib.md.
@@ -9,6 +15,8 @@ font). The C64 libraries that use them: docs/v2i-lib.md and docs/v2t-lib.md.
 
 import argparse
 import glob
+import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -52,8 +60,62 @@ def rle_zero(data):
     return out + b"\0\0"
 
 
-def convert_image(path, log=print, frame=False, leading=TEXT_LEADING, at=None):
+CACHE_VERSION = 1             # bump when the .v2i/.txt packing below changes
+CACHE_SOURCES = ("convert.py", "timing.py", "palette.py", "font.py")
+
+
+def cache_key(path, frame, leading, at):
+    """Everything a conversion depends on: the image, its text, the options and the
+    converter sources."""
+    h = hashlib.sha1(repr((CACHE_VERSION, frame, leading, at)).encode())
+    txt = os.path.splitext(path)[0] + ".txt"
+    for f in [path, txt] + [os.path.join(ROOT, "vic2", s) for s in CACHE_SOURCES]:
+        if os.path.exists(f):             # contents only: the same file may be named
+            with open(f, "rb") as fh:     # by a relative or an absolute path
+                data = fh.read()
+            h.update(b"%d:" % len(data) + data)
+        else:
+            h.update(b"-")
+    return h.hexdigest()
+
+
+def log_stats(inf, log, cached=False):
+    w, h = inf["w"], inf["h"]
+    log("%-17s %3dx%-3d bad lines %3d/%-3d  wrong pixels %5d (%.1f%%)  first bad line %3d  %5d bytes%s" %
+        (inf["name"], w, h, len(inf["bad_lines"]), h, inf["wrong_px"], 100.0 * inf["wrong_px"] / (w * h),
+         inf["first_bad"], inf["size"], "  (cached)" if cached else ""))
+
+
+def cached_image(path, key):
+    """The info convert_image returned for path last time, if nothing changed since."""
     name = os.path.splitext(os.path.basename(path))[0]
+    meta = os.path.join(BUILD, name + ".json")
+    try:
+        with open(meta) as f:
+            inf = json.load(f)
+    except (OSError, ValueError):
+        return None
+    files = [inf.get("v2i"), inf.get("expected_png")] + ([inf["txt"]] if inf.get("txt") else [])
+    if inf.get("key") != key or not all(f and os.path.exists(f) for f in files):
+        return None
+    os.utime(meta)                      # up to date (for make)
+    g = inf.pop("geom")
+    inf["geom"] = convert.Geometry(inf["w"], inf["h"], frame=g["frame"], at=(g["col0"], g["row0"]))
+    inf["expected"] = load_indexed(inf["expected_png"])[2]
+    return inf
+
+
+def convert_image(path, log=print, frame=False, leading=TEXT_LEADING, at=None, force=False):
+    """Convert one image to build/<name>.v2i (and its text to build/<name>.txt.prg). Reuses
+    the previous result (build/<name>.json) when nothing it depends on changed, unless
+    force."""
+    name = os.path.splitext(os.path.basename(path))[0]
+    key = cache_key(path, frame, leading, at)
+    if not force:
+        inf = cached_image(path, key)
+        if inf:
+            log_stats(inf, log, cached=True)
+            return inf
     w, h, img = load_indexed(path)
     pos = at or ((1, 1) if frame else (0, 0))
     if frame and not convert.Geometry.frame_fits(pos[0], pos[1], w // 8, h // 8):
@@ -98,7 +160,8 @@ def convert_image(path, log=print, frame=False, leading=TEXT_LEADING, at=None):
     os.makedirs(BUILD, exist_ok=True)
     packed = [bytes(conv.kernel.code), rle_zero(bmp), rle_zero(scr), rle_zero(spr)]
     out = conv.render()
-    save_indexed(os.path.join(BUILD, "%s_expected.png" % name), out)
+    expected_png = os.path.join(BUILD, "%s_expected.png" % name)
+    save_indexed(expected_png, out)
     wrong_px = sum(1 for y in range(h) for x in range(w) if out[y][x] != img[y][x])
     bad_lines = sorted(y for y in range(h) if any(out[y][x] != img[y][x] for x in range(w)))
     first_bad = bad_lines[0] if bad_lines else h
@@ -113,10 +176,9 @@ def convert_image(path, log=print, frame=False, leading=TEXT_LEADING, at=None):
     size = os.path.getsize(v2i) - 2
     txt = os.path.splitext(path)[0] + ".txt"
     txt = make_text(txt, g, name, log, leading) if os.path.exists(txt) else None
-    info = dict(txt=txt, name=name, w=w, h=h, geom=g, conv=conv, img=img, expected=out, size=size,
+    info = dict(txt=txt, name=name, w=w, h=h, geom=g, expected=out, size=size,
                 bad_lines=bad_lines, wrong_px=wrong_px, first_bad=first_bad, v2i=v2i)
-    log("%-17s %3dx%-3d bad lines %3d/%-3d  wrong pixels %5d (%.1f%%)  first bad line %3d  %5d bytes" %
-        (name, w, h, len(bad_lines), h, wrong_px, 100.0 * wrong_px / (w * h), first_bad, size))
+    log_stats(info, log)
     # side-by-side: source | expected C64 output | wrong pixels
     sbs = Image.new("RGB", (w * 3 + 16, h), (40, 40, 40))
     for i, rows in enumerate((img, out)):
@@ -129,6 +191,11 @@ def convert_image(path, log=print, frame=False, leading=TEXT_LEADING, at=None):
     sbs.paste(diff, (2 * (w + 8), 0))
     sbs.resize((sbs.width * 3, sbs.height * 3), Image.NEAREST).save(
         os.path.join(BUILD, "%s_compare.png" % name))
+    meta = {k: v for k, v in info.items() if k not in ("geom", "expected")}
+    meta.update(key=key, expected_png=expected_png,
+                geom=dict(col0=g.col0, row0=g.row0, frame=g.frame))
+    with open(os.path.join(BUILD, name + ".json"), "w") as f:
+        json.dump(meta, f)
     return info
 
 
@@ -143,6 +210,23 @@ def write_inc(infos, auto_frames):
         if inf["txt"]:
             lines.append('txt%d: .incbin "%s", 2' % (i, inf["txt"]))
     with open(os.path.join(BUILD, "images.inc"), "w") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def write_diskshow_inc(infos, hold_frames):
+    """File names for asm/diskshow.s, as c1541 writes them (see disk_files)."""
+    def entry(label, name):
+        return "%s: .byte %d,%s" % (label, len(name), ",".join("$%02x" % petscii(c) for c in name))
+    lines = ["SHOW_COUNT = %d" % len(infos), "HOLD_FRAMES = %d" % hold_frames, "", "        .data"]
+    lines.append("name_lo: .byte %s" % ",".join("<dsn%d" % i for i in range(len(infos))))
+    lines.append("name_hi: .byte %s" % ",".join(">dsn%d" % i for i in range(len(infos))))
+    lines.append("tname_lo: .byte %s" % ",".join("<dst%d" % i if f["txt"] else "0" for i, f in enumerate(infos)))
+    lines.append("tname_hi: .byte %s" % ",".join(">dst%d" % i if f["txt"] else "0" for i, f in enumerate(infos)))
+    for i, inf in enumerate(infos):
+        lines.append(entry("dsn%d" % i, disk_name(inf["name"])))
+        if inf["txt"]:
+            lines.append(entry("dst%d" % i, text_disk_name(inf["name"])))
+    with open(os.path.join(BUILD, "diskshow.inc"), "w") as f:
         f.write("\n".join(lines) + "\n")
 
 
@@ -203,6 +287,52 @@ def disk_name(name):
     return name.upper().replace("-C64", "")[:16]
 
 
+def text_disk_name(name):
+    return disk_name(name)[:12] + ".TXT"
+
+
+def petscii(c):
+    """The byte c1541 writes for c in a file name we pass in lower case (A-Z as typed on the
+    C64, unshifted)."""
+    return ord(c.upper())
+
+
+DISKS = {"d64": (664, 144), "d81": (3160, 296)}     # free blocks, directory entries
+
+
+def blocks(path):
+    return max(1, -(-os.path.getsize(path) // 254))
+
+
+def make_disk(files, kind):
+    """Write build/vic2orious.<kind> with files [(path, disk name)]; kind None: d64 if
+    everything fits, else d81. Removes the other kind. Returns the disk's path."""
+    need = sum(blocks(p) for p, _ in files)
+    fits = [k for k, (free, entries) in DISKS.items() if need <= free and len(files) <= entries]
+    if kind is None:
+        if not fits:
+            raise SystemExit("%d files (%d blocks) do not fit even on a d81; pass fewer images"
+                             % (len(files), need))
+        kind = fits[0]
+    elif kind not in fits:
+        raise SystemExit("%d files (%d blocks) do not fit on a %s (%d blocks); try --disk d81"
+                         % (len(files), need, kind, DISKS[kind][0]))
+    disk = os.path.join(BUILD, "vic2orious." + kind)
+    for k in DISKS:
+        if os.path.exists(os.path.join(BUILD, "vic2orious." + k)):
+            os.remove(os.path.join(BUILD, "vic2orious." + k))
+    cmd = ["c1541", "-format", "vic2orious,v2", kind, disk]
+    for path, name in files:
+        cmd += ["-write", path, name.lower()]
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
+    print("%s: %d files, %d of %d blocks" % (disk, len(files), need, DISKS[kind][0]))
+    return disk
+
+
+class Overflow(SystemExit):
+    pass
+
+
 def assemble(out_prg, source="slideshow.s", frame=False, defines=()):
     with open(os.path.join(BUILD, "font.inc"), "w") as f:
         f.write(Font().asm())
@@ -213,13 +343,49 @@ def assemble(out_prg, source="slideshow.s", frame=False, defines=()):
                           "--asm-include-dir", BUILD, "--asm-include-dir", ASM] + defs +
                          ["-o", out_prg, os.path.join(ASM, source)],
                          cwd=BUILD, capture_output=True, text=True)
+    for f in glob.glob(os.path.join(ASM, "*.o")):
+        os.remove(f)
     if res.returncode:
         msg = res.stderr.strip()
         if "overflows memory area" in msg:
-            msg += "\n(the images do not all fit in one PRG; pass fewer or smaller images)"
+            raise Overflow("assembly failed:\n" + msg + "\n(the images do not all fit in one PRG)")
         raise SystemExit("assembly failed:\n" + msg)
-    for f in glob.glob(os.path.join(ASM, "*.o")):
-        os.remove(f)
+
+
+SLIDESHOW_SPACE = 0xC000 - 0x0801 - 3000    # a little more than is left for images
+
+
+def assemble_slideshow(prg, infos, auto, frame):
+    """Assemble the slideshow with as many of the images (from the first on) as fit.
+    Returns how many."""
+    n, total = 0, 0
+    for inf in infos:
+        total += inf["size"] + (os.path.getsize(inf["txt"]) - 2 if inf["txt"] else 0)
+        if total > SLIDESHOW_SPACE:
+            break
+        n += 1
+    while n:
+        write_inc(infos[:n], auto)
+        try:
+            assemble(prg, frame=frame)
+            return n
+        except Overflow:
+            n -= 1
+    raise SystemExit("not even the first image fits in the slideshow")
+
+
+def diskshow_screenshot(prg, disk, png, cycles):
+    """Like vice_screenshot, with disk in drive 8 (true drive emulation)."""
+    if os.path.exists(png):
+        os.remove(png)
+    cmd = ["x64sc", "-default", "-pal", "-warp", "-sounddev", "dummy", "+sound",
+           "-VICIIfilter", "0", "-VICIIextpal", "-VICIIpalette", "pepto-pal.vpl"]
+    if disk.endswith(".d81"):
+        cmd += ["-drive8type", "1581"]
+    cmd += ["-8", disk, "-autostartprgmode", "1", "-autostart", prg,
+            "-limitcycles", str(cycles), "-exitscreenshot", png]
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
+    return os.path.exists(png)
 
 
 def vice_screenshot(prg, png, cycles=10_000_000):
@@ -354,8 +520,21 @@ def main():
     ap.add_argument("--at", metavar="COLUMN,ROW",
                     help="place the images at this character column and row (default 0,0; 1,1 "
                          "with -b)")
-    ap.add_argument("--auto", type=int, default=250, help="frames per image (max 255) in the slideshow")
+    ap.add_argument("--auto", type=int, default=250,
+                    help="frames per image (max 255) in the slideshow (0: until space)")
+    ap.add_argument("--hold", type=int, default=15,
+                    help="seconds per image (max 1300) in diskshow, not counting the loading "
+                         "(0: until space)")
+    ap.add_argument("--disk", choices=sorted(DISKS),
+                    help="disk image type (default: d64 if everything fits, else d81)")
+    ap.add_argument("--convert-only", action="store_true",
+                    help="convert the images and build nothing else")
+    ap.add_argument("--force", action="store_true", help="convert images even if unchanged")
     a = ap.parse_args()
+    if not 0 <= a.auto <= 255:
+        ap.error("--auto must be 0..255")
+    if not 0 <= a.hold <= 1300:
+        ap.error("--hold must be 0..1300")
     if not 0 <= a.leading <= 64:
         ap.error("--leading must be 0..64")
     at = None
@@ -367,10 +546,18 @@ def main():
             ap.error("--at takes COLUMN,ROW")
     images = a.images or sorted(glob.glob(os.path.join(ROOT, "input", "*.png")))
     os.makedirs(BUILD, exist_ok=True)
-    infos = [convert_image(p, frame=a.frame, leading=a.leading, at=at) for p in images]
-    write_inc(infos, a.auto)
+    infos = [convert_image(p, frame=a.frame, leading=a.leading, at=at, force=a.force)
+             for p in images]
+    if a.convert_only:
+        return 0
     prg = os.path.join(BUILD, "slideshow.prg")
-    assemble(prg, frame=a.frame)
+    in_prg = assemble_slideshow(prg, infos, a.auto, a.frame)
+    if in_prg < len(infos):
+        print("slideshow.prg holds the first %d of the %d images; diskshow loads them all from disk"
+              % (in_prg, len(infos)))
+    diskshow = os.path.join(BUILD, "diskshow.prg")
+    write_diskshow_inc(infos, a.hold * 50)
+    assemble(diskshow, "diskshow.s", frame=a.frame)
     viewer = os.path.join(BUILD, "viewer.prg")
     assemble(viewer, "viewer.s", frame=a.frame)
     demos = []
@@ -398,26 +585,17 @@ def main():
             out = os.path.join(BUILD, "ask-%s.prg" % inf["name"])
             assemble(out, "ask.s", frame=a.frame)
             asks.append((ask, out))
-    d64 = os.path.join(BUILD, "vic2orious.d64")
-    cmd = ["c1541", "-format", "vic2orious,v2", "d64", d64,
-           "-write", viewer, "viewer", "-write", prg, "slideshow"]
-    names = ["viewer", "slideshow"]
+    files = [(viewer, "viewer"), (diskshow, "diskshow"), (prg, "slideshow")]
     for inf in infos:
-        cmd += ["-write", inf["v2i"], disk_name(inf["name"]).lower()]
-        names.append(disk_name(inf["name"]).lower())
+        files.append((inf["v2i"], disk_name(inf["name"])))
         if inf["txt"]:
-            cmd += ["-write", inf["txt"], disk_name(inf["name"])[:12].lower() + ".txt"]
-            names.append(disk_name(inf["name"])[:12].lower() + ".txt")
+            files.append((inf["txt"], text_disk_name(inf["name"])))
     for ask, out in asks:
-        name = "ask " + disk_name(ask.info["name"]).lower()[:12]
-        cmd += ["-write", out, name]
-        names.append(name)
-    for out, name in demos:
-        cmd += ["-write", out, name]
-        names.append(name)
-    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
-    print("built %s (%d bytes), %s and %s" % (prg, os.path.getsize(prg), viewer, d64))
-    print("disk files: " + ", ".join(names))
+        files.append((out, "ask " + disk_name(ask.info["name"])[:12]))
+    files += demos
+    disk = make_disk(files, a.disk)
+    print("built %s (%d bytes), %s, %s and %s" % (prg, os.path.getsize(prg), diskshow, viewer, disk))
+    print("disk files: " + ", ".join(name.lower() for _, name in files))
     ok = True
     if a.verify:
         font = Font()
@@ -441,8 +619,30 @@ def main():
         if story:
             ok &= check_in_vice(v2t_demo, os.path.join(BUILD, "vice_v2t_demo.png"),
                                 v2t_demo_screen(story).pixels(), "v2t demo")
-        write_inc(infos, a.auto)
-        assemble(prg, frame=a.frame)
+        # diskshow: the first image (and its text) from a disk of its own, shown until space
+        inf = infos[0]
+        write_diskshow_inc([inf], 0)
+        one = os.path.join(BUILD, "verify_diskshow.prg")
+        assemble(one, "diskshow.s", frame=a.frame)
+        vdisk = os.path.join(BUILD, "verify_diskshow.d64")
+        cmd = ["c1541", "-format", "verify,v2", "d64", vdisk, "-write", inf["v2i"],
+               disk_name(inf["name"]).lower()]
+        if inf["txt"]:
+            cmd += ["-write", inf["txt"], text_disk_name(inf["name"]).lower()]
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
+        png = os.path.join(BUILD, "vice_diskshow.png")
+        size = inf["size"] + (os.path.getsize(inf["txt"]) if inf["txt"] else 0)
+        if diskshow_screenshot(one, vdisk, png, 40_000_000 + 8_000 * size):
+            res = compare_screenshot(png, expected_screen(inf).pixels())
+            n = len(res[2]) if res else -1
+            print("  diskshow: VICE output vs model: %d differing pixels" % n)
+            ok &= n == 0
+        else:
+            print("  diskshow: no screenshot")
+            ok = False
+        write_diskshow_inc(infos, a.hold * 50)
+        assemble(diskshow, "diskshow.s", frame=a.frame)
+        assemble_slideshow(prg, infos, a.auto, a.frame)
     if a.run:
         subprocess.Popen(["x64sc", "-pal", "-VICIIextpal", "-VICIIpalette", "pepto-pal.vpl",
                           "-autostartprgmode", "1", prg],

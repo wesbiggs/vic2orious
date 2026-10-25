@@ -1,6 +1,6 @@
 ; vic2orious slideshow: .v2i images (hires bitmap + per-line multiplexed hires sprites),
 ; embedded in the program. Space advances to the next image; otherwise images change
-; every AUTO_FRAMES frames.
+; every AUTO_FRAMES frames (0: only on space).
 
         .include "images.inc"           ; generated: IMAGE_COUNT, AUTO_FRAMES, img/txt tables, data
 
@@ -62,6 +62,7 @@ select: ldx cur                         ; show image #cur and its text, if it ha
 :       rts
 
 hook:
+.if AUTO_FRAMES
         inc frame
         lda frame
         cmp #AUTO_FRAMES
@@ -70,7 +71,9 @@ hook:
         sta frame
         lda #1
         sta req
-:       lda #$7f                        ; keyboard row 7: space = bit 4
+:
+.endif
+        lda #$7f                        ; keyboard row 7: space = bit 4
         sta $dc00
         lda $dc01
         and #$10

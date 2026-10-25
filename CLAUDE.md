@@ -2,8 +2,9 @@
 
 Converts C64-palette PNGs into C64 hires bitmap + per-line multiplexed hires sprites, aiming
 for pixel-perfect output, and plays the results on a real (emulated) C64: a slideshow PRG
-with the images embedded, a viewer PRG that loads `.v2i` image files (plus optional
-`.txt` narrative files drawn beside the picture) from disk, and an interactive `ask` demo.
+with the images embedded, a disk slideshow (`diskshow`) that loads every image in turn, a
+viewer PRG that loads `.v2i` image files (plus optional `.txt` narrative files drawn
+beside the picture) from disk by name, and an interactive `ask` demo.
 The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.inc`
 (text), that other programs can include. Apache-2.0 licensed (`LICENSE`).
 
@@ -19,8 +20,9 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   write cycles allowed after BA goes low), the kernel code generator (prologue, sync phase)
   and the EDF write scheduler with per-line checkpoints.
 - `vic2/build.py`: CLI. Converts images, writes `.v2i`/`.txt` files, generates
-  `build/images.inc`, `build/ask.inc` and `build/font.inc`, assembles with cl65, makes the
-  D64, and optionally verifies in VICE. The file formats are documented in its docstring.
+  `build/images.inc`, `build/diskshow.inc`, `build/ask.inc` and `build/font.inc`,
+  assembles with cl65, makes the D64 (or D81), and optionally verifies in VICE. The file
+  formats are documented in its docstring.
 - `vic2/screen.py`: Python model of the screen as the library's text/clear routines leave
   it (used by `--verify`). `vic2/ask.py`: `.ask` parsing, layout and model for the demo.
 - `vic2/font.py`: proportional font derived from the ROM lower/upper case set, plus the
@@ -30,7 +32,8 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   unpacking into VIC bank 3, frame). `asm/v2t.inc`: text library (`v2t_*`: .v2t files,
   single lines, measure, clear; bitmap/screen addresses configurable, no VIC setup).
   Each stands alone (own zero page block, own row address helper, prefixed names).
-  `asm/slideshow.s`, `asm/viewer.s` and `asm/ask.s` use both; `asm/v2i-demo.s` and
+  `asm/slideshow.s`, `asm/diskshow.s`, `asm/viewer.s` and `asm/ask.s` use both;
+  `asm/v2i-demo.s` and
   `asm/v2t-demo.s` (KERNAL on, bitmap in bank 1) use one each.
 - `docs/`: `v2i-format.md`, `v2t-format.md` (incl. the font), `v2i-lib.md`, `v2t-lib.md`.
   Keep them in sync with the code.
@@ -95,10 +98,17 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 
 - Build everything from `input/`: `make` (or `python3 -m vic2.build`; add `--verify` to
   compare each screen with VICE, `--run` to launch the slideshow; specific files can be
-  passed as arguments). The Makefile wraps it: `make verify`, `make run[-viewer|-ask|-d64]`,
-  options `IMAGES FRAME AT LEADING AUTO IMAGE ASK` (`make help`). macOS make is 3.81, so
-  the Makefile uses a stamp file (`build/.built`, plus `build/.opts` for the options)
-  instead of grouped targets.
+  passed as arguments). The Makefile wraps it: `make verify`,
+  `make run[-diskshow|-viewer|-ask|-d64]`, options `IMAGES FRAME AT LEADING AUTO HOLD
+  DISK IMAGE ASK` (`make help`). macOS make is 3.81, so the Makefile uses a stamp file
+  (`build/.built`, plus `build/.opts`/`.copts` for the options) instead of grouped targets.
+- Conversion cache: `build/<name>.json` holds the converter result (stats, geometry, path
+  of `_expected.png`) and a key hashing the png, its `.txt`, frame/at/leading,
+  `CACHE_VERSION` and `CACHE_SOURCES` (convert, timing, palette, font). Builds reuse it;
+  `--force` reconverts. build.py itself is not hashed: bump `CACHE_VERSION` when changing
+  how `.v2i`/`.txt` are packed. The Makefile converts each image in its own
+  `--convert-only` run (target `build/<name>.json`, so `make -j` parallelises), then runs
+  the full build, which finds everything cached.
 - After touching `timing.py`, `convert.py`, `v2i.inc` or `v2t.inc`, run `--verify`: every check
   must report `0 differing pixels` (VICE output vs the model). The converter itself reports
   bad lines / wrong pixels vs the source; those are expected to be non-zero.
@@ -118,7 +128,12 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   The viewer test pattern: `-8 build/vic2orious.d64 -autostart build/viewer.prg -keybuf
   'princess\n'` (loading takes ~90M cycles with true drive emulation).
 - Memory: the slideshow PRG must fit `$0801-$bfff` (about 46K); each image is 9-15K, so
-  3-4 images. VIC bank 3 (`$c000-$ffff`) holds the image on screen and is not available.
+  3-4 images. With more, `assemble_slideshow` keeps the longest prefix that assembles;
+  `diskshow` gets all of them (names baked in from `build/diskshow.inc`, loaded like the
+  viewer, text screen shown while loading; `HOLD` seconds per image, 16-bit frame count,
+  0 holds an image until space, used by its `--verify` check, which boots it with a one-image D64). The disk is a D64 if
+  everything fits (664 blocks, 144 entries; about 13 images), else a D81 (3160 blocks;
+  VICE needs `-drive8type 1581`, which the Makefile adds). VIC bank 3 (`$c000-$ffff`) holds the image on screen and is not available.
   The viewer must end below `$1800` (asserted): text files load there, images at `$2000`.
   (It used to load text at `$1000` and overwrote the end of its own font.)
 - Disk names: images keep their name (cut to 16 chars, `-c64` dropped); text files are the
@@ -147,6 +162,7 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 
 - Store the kernel as a compact write list and generate code on load (kernel is about half
   of each image; would fit roughly 6 images per PRG).
-- Fastloader / IRQ-safe loader for the viewer (the KERNAL load is slow and cannot run
-  while a kernel is displaying).
+- Fastloader / IRQ-safe loader for the viewer and diskshow (the KERNAL load is slow and
+  cannot run while a kernel is displaying; with one, diskshow could load the next image
+  while showing the current one).
 - C64-side word wrap for plain text files; custom fonts from a PNG.

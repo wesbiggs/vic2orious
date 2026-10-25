@@ -54,36 +54,52 @@ make                                  # all images in input/
 make IMAGES="input/a.png input/b.png" # or just these
 make FRAME=1                          # frame the images (row 1, column 1)
 make AT=2,3                           # place the images at character column 2, row 3
+make -j8                              # convert up to 8 images at once
+make convert                          # only convert the images (build/<name>.v2i)
 make verify                           # build and compare every screen with VICE
 make clean
 ```
 
-Further options: `LEADING=n` (pixel lines between text lines, default 2) and `AUTO=n`
-(frames per slideshow image, default 250). `make help` lists everything. The Makefile
-runs `python3 -m vic2.build` (see `python3 -m vic2.build --help`) and rebuilds only when
-inputs or options change.
+Further options: `LEADING=n` (pixel lines between text lines, default 2), `AUTO=n`
+(frames per slideshow image, default 250; 0: only space changes the image) and
+`HOLD=n` (seconds diskshow shows each image, default 15; 0: until space) and
+`DISK=d64|d81`. `make help` lists everything. The Makefile runs `python3 -m vic2.build`
+(see `python3 -m vic2.build --help`) and rebuilds only when inputs or options change.
+
+Each image is converted once. `build/<name>.json` records what the conversion depended on
+(the image, its story, the options, the converter sources), and later builds reuse the
+`.v2i` while all that stays the same, so adding an image or editing a story only converts
+that one. `python3 -m vic2.build --force` converts everything again.
 
 For every image the build prints how many lines and pixels could not be reproduced
 exactly, and writes `build/<name>_compare.png` (source | C64 result | wrong pixels in
 red). Outputs:
 
-- `build/slideshow.prg`: all images in one program; space for the next image, otherwise
-  they change every 5 seconds. Only 3-4 images fit.
+- `build/slideshow.prg`: the images in one program; space for the next image, otherwise
+  they change every 5 seconds. Only 3-4 images fit; with more, it takes the first ones
+  that fit and says so.
+- `build/diskshow.prg`: the same slideshow for any number of images, loading each one
+  (and its story) from disk in turn and showing it for `HOLD` seconds (space: next).
+  Loading uses the KERNAL, so it is slow (around half a minute per image with true drive
+  emulation), and the image can't stay up meanwhile: the text screen says what is
+  loading. RUN/STOP returns to BASIC.
 - `build/ask-<name>.prg`: the ask demo for every image with an `.ask` file.
 - `build/v2i-demo.prg`, `build/v2t-demo.prg`: the smallest programs using just one of the
   two libraries (an image; text without an image).
-- `build/vic2orious.d64`: disk with `viewer`, `slideshow`, the demos, and every image and
-  story as separate files.
+- `build/vic2orious.d64`: disk with `viewer`, `diskshow`, `slideshow`, the demos, and
+  every image and story as separate files. When they do not fit on a 1541 disk (about 13
+  images) it is `build/vic2orious.d81` (1581, about 60 images) instead.
 
 ## 5. Watch
 
 ```bash
 make run                              # the slideshow
+make run-diskshow                     # the disk slideshow (all images)
 make run-viewer IMAGE=princess        # the disk viewer, with the image name typed in
 make run-ask ASK=princess             # the ask demo
 make run-v2i                          # image only
 make run-v2t                          # text only
-make run-d64                          # boot the disk (starts the viewer)
+make run-d64                          # boot the disk (.d64 or .d81; starts the viewer)
 ```
 
 In the viewer, type an image name. Space returns to the prompt; an empty name quits. In
