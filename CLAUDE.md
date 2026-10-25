@@ -22,9 +22,10 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   switches module globals (`CYCLES`, `LINES`, `SPR_P`, `Y_AFTER`, `FPS`) for the whole
   process; `build --ntsc` calls it before converting.
 - `vic2/build.py`: CLI. Converts images, writes `.v2i`/`.txt` files, generates
-  `build/images.inc`, `build/diskshow.inc`, `build/ask.inc` and `build/font.inc`,
-  assembles with cl65, makes the D64 (or D81), and optionally verifies in VICE. The file
-  formats are documented in its docstring.
+  `images.inc`, `diskshow.inc`, `ask.inc` and `font.inc`, assembles with cl65, makes the
+  D64 (or D81), and optionally verifies in VICE, all in one build directory per video
+  system: `build/pal/`, `build/ntsc/` (`build/dual/` for the dual disk). The file formats
+  are documented in its docstring.
 - `vic2/screen.py`: Python model of the screen as the library's text/clear routines leave
   it (used by `--verify`). `vic2/ask.py`: `.ask` parsing, layout and model for the demo.
 - `vic2/font.py`: proportional font derived from the ROM lower/upper case set, plus the
@@ -45,8 +46,8 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   `-b` frame option was removed: framed pixels did not always convert exactly; frames come
   from `v2i_frame` (`build -b`).
 - `input/`: images (`name.png`), optional stories (`name.txt`) and optional demo questions
-  (`name.ask`, builds `build/ask-name.prg`). `images/` holds older test images (local only, gitignored). `build/` is
-  generated and gitignored.
+  (`name.ask`, builds `build/pal/ask-name.prg`). `images/` holds older test images (local
+  only, gitignored). `build/` is generated and gitignored.
 
 ## How it works (the parts that are easy to break)
 
@@ -93,8 +94,9 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   `src/viciisc/vicii-chip-model.c` (`cycle_tab_pal`/`cycle_tab_ntsc`; BA low from 3
   cycles before a p-access to 1 after). `.v2i` version 2 has the system in header byte
   24; `v2i_init` detects the machine from its last raster line (`$37` PAL, `$06` NTSC)
-  and `v2i_show` refuses a file for the other system (hosts print `v2i_errmsg`). NTSC
-  builds go to `build/ntsc/` (`NTSC=1` in make, VICE `-ntsc`); `--verify` checks either.
+  and `v2i_show` refuses a file for the other system (hosts print `v2i_errmsg`). PAL
+  builds go to `build/pal/`, NTSC builds to `build/ntsc/` (`NTSC=1` in make, VICE
+  `-ntsc`); `--verify` checks either.
 - Dual disk (`build --dual`, `make DUAL=1`): `build_system` runs for PAL and NTSC (cached
   conversions, own disks), then `build_dual` writes `build/dual/` with diskshow and viewer
   assembled `DUAL=1`: they call `v2i_detect` (KERNAL on) and add `-P.V2I`/`-N.V2I` to the
@@ -123,14 +125,15 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   compare each screen with VICE, `--run` to launch the slideshow; specific files can be
   passed as arguments). The Makefile wraps it: `make verify`,
   `make run[-diskshow|-viewer|-ask|-d64]`, options `IMAGES FRAME AT LEADING AUTO HOLD
-  DISK IMAGE ASK` (`make help`). macOS make is 3.81, so the Makefile uses a stamp file
-  (`build/.built`, plus `build/.opts`/`.copts` for the options) instead of grouped targets.
-- Conversion cache: `build/<name>.json` holds the converter result (stats, geometry, path
+  DISK NTSC DUAL FAST IMAGE ASK` (`make help`). macOS make is 3.81, so the Makefile uses a
+  stamp file (`build/<system>/.built`, plus `.opts`/`.copts` there for the options) instead
+  of grouped targets.
+- Conversion cache: `build/pal/<name>.json` (`build/ntsc/` for NTSC) holds the converter result (stats, geometry, path
   of `_expected.png`) and a key hashing the png, its `.txt`, frame/at/leading,
   `CACHE_VERSION` and `CACHE_SOURCES` (convert, timing, palette, font). Builds reuse it;
   `--force` reconverts. build.py itself is not hashed: bump `CACHE_VERSION` when changing
   how `.v2i`/`.txt` are packed. The Makefile converts each image in its own
-  `--convert-only` run (target `build/<name>.json`, so `make -j` parallelises), then runs
+  `--convert-only` run (target `build/<system>/<name>.json`, so `make -j` parallelises), then runs
   the full build, which finds everything cached.
 - After touching `timing.py`, `convert.py`, `v2i.inc` or `v2t.inc`, run `--verify`: every check
   must report `0 differing pixels` (VICE output vs the model). The converter itself reports
@@ -153,11 +156,11 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   in this VICE). The Makefile's `FAST=1` adds both; checked with diskshow on the D81, 0
   differing pixels. `--verify` still uses true drive emulation. A PRG that is not on the
   attached disk needs `-autostartprgmode 1` (otherwise VICE looks for it on the disk).
-  The viewer test pattern: `-8 build/vic2orious.d64 -autostart build/viewer.prg -keybuf
-  'princess\n'`.
+  The viewer test pattern: `-8 build/pal/vic2orious.d64 -autostart build/pal/viewer.prg
+  -keybuf 'princess\n'`.
 - Memory (see also Buffers above): the slideshow PRG must fit `$0801-$bfff` (about 46K); each image is 9-15K, so
   3-4 images. With more, `assemble_slideshow` keeps the longest prefix that assembles;
-  `diskshow` gets all of them (names baked in from `build/diskshow.inc`, loaded like the
+  `diskshow` gets all of them (names baked in from `diskshow.inc`, loaded like the
   viewer, text screen shown while loading; `HOLD` seconds per image, 16-bit frame count,
   0 holds an image until space, used by its `--verify` check, which boots it with a one-image D64). The disk is a D64 if
   everything fits (664 blocks, 144 entries; about 13 images), else a D81 (3160 blocks;

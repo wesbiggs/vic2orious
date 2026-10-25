@@ -1,13 +1,14 @@
 """Convert images to .v2i files, assemble the slideshow, viewer and demos, build a D64
 and optionally verify in VICE.
 
-usage: python3 -m vic2.build [-b] [--at COLUMN,ROW] [--ntsc] [--disk d64|d81]
+usage: python3 -m vic2.build [-b] [--at COLUMN,ROW] [--ntsc | --dual] [--disk d64|d81]
                              [--convert-only] [--force] [--verify] [--run] [images...]
 
 Kernels are cycle exact for one video system: PAL by default, NTSC (6567R8) with --ntsc.
-An NTSC build goes to build/ntsc/ instead of build/, so both can be kept.
+A PAL build goes to build/pal/, an NTSC build to build/ntsc/, so both can be kept;
+--dual builds both and a disk with both in build/dual/.
 
-Each image is converted once: build/<name>.json records what the conversion depended on,
+Each image is converted once: build/<system>/<name>.json records what the conversion depended on,
 and later builds reuse the .v2i while that is unchanged (--force converts anyway).
 --convert-only converts and builds nothing else; the Makefile uses it to convert images one
 by one (make -j converts them in parallel).
@@ -33,7 +34,7 @@ from .palette import load_indexed, save_indexed, PEPTO, nearest, load_vpl
 from .screen import Screen
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BUILD = os.path.join(ROOT, "build")         # build/ntsc with --ntsc (see main)
+BUILD = os.path.join(ROOT, "build", "pal")  # build/ntsc with --ntsc (see use_system)
 ASM = os.path.join(ROOT, "asm")
 V2I_VERSION = 2
 V2I_LOAD = 0x2000
@@ -529,11 +530,11 @@ def check_in_vice(prg, png, exp, label, retry=True):
 
 
 def use_system(standard, dual=False):
-    """Kernels for standard from here on, and its build directory (build/, build/ntsc/;
+    """Kernels for standard from here on, and its build directory (build/pal/, build/ntsc/;
     build/dual/ for the dual disk's own files)."""
     global BUILD
     timing.set_standard(standard)
-    BUILD = os.path.join(ROOT, "build", *(["dual"] if dual else ["ntsc"] if standard == "ntsc" else []))
+    BUILD = os.path.join(ROOT, "build", "dual" if dual else standard)
     os.makedirs(BUILD, exist_ok=True)
 
 
@@ -715,9 +716,9 @@ def main():
                          "(0: until space)")
     ap.add_argument("--ntsc", action="store_true",
                     help="make the kernels for NTSC C64s (6567R8) instead of PAL; builds into "
-                         "build/ntsc/")
+                         "build/ntsc/ instead of build/pal/")
     ap.add_argument("--dual", action="store_true",
-                    help="build for both PAL and NTSC (build/, build/ntsc/) and a disk with "
+                    help="build for both PAL and NTSC (build/pal/, build/ntsc/) and a disk with "
                          "both, whose diskshow and viewer pick the files for the machine "
                          "(build/dual/)")
     ap.add_argument("--disk", choices=sorted(DISKS),

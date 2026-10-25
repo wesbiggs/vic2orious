@@ -14,7 +14,8 @@ LEADING ?=                      # pixel lines between text lines (default 2)
 AUTO    ?=                      # frames per slideshow image (default 250, 0: until space)
 HOLD    ?=                      # seconds per diskshow image (default 15, 0: until space)
 DISK    ?=                      # d64 or d81 (default: d64 if everything fits, else d81)
-NTSC    ?=                      # 1: build for NTSC C64s, into build/ntsc/ (default: PAL);
+NTSC    ?=                      # 1: build for NTSC C64s, into build/ntsc/ (default: PAL,
+                                #    into build/pal/);
                                 #    with DUAL=1: run in NTSC VICE
 DUAL    ?=                      # 1: build both, and a disk for both in build/dual/
 FAST    ?=                      # 1: run-diskshow/-viewer/-d64 load instantly (no true drive
@@ -22,9 +23,9 @@ FAST    ?=                      # 1: run-diskshow/-viewer/-d64 load instantly (n
 IMAGE   ?=                      # run-viewer: image name to type at the prompt
 ASK     ?= princess             # run-ask: which ask-<name>.prg
 
-# build directories: SYS for the programs with images in them (build/, build/ntsc/), B
-# for the disk with diskshow and viewer (build/dual/ with DUAL=1); VICE's video system
-SYS  := build$(if $(strip $(NTSC)),/ntsc)
+# build directories: SYS for the programs with images in them (build/pal/, build/ntsc/),
+# B for the disk with diskshow and viewer (build/dual/ with DUAL=1); VICE's video system
+SYS  := build/$(if $(strip $(NTSC)),ntsc,pal)
 B    := $(if $(strip $(DUAL)),build/dual,$(SYS))
 VICE := $(X64) $(if $(strip $(NTSC)),-ntsc,-pal) -VICIIextpal -VICIIpalette pepto-pal.vpl
 
@@ -33,7 +34,7 @@ CBASE      := $(strip $(if $(strip $(FRAME)),-b) $(if $(strip $(AT)),--at $(stri
               $(if $(strip $(LEADING)),--leading $(strip $(LEADING))))
 COPTS_pal  := $(CBASE)
 COPTS_ntsc := $(strip --ntsc $(CBASE))
-DIR_pal    := build
+DIR_pal    := build/pal
 DIR_ntsc   := build/ntsc
 SYSTEMS    := $(if $(strip $(DUAL)),pal ntsc,$(if $(strip $(NTSC)),ntsc,pal))
 OPTS  := $(strip $(if $(strip $(DUAL)),--dual $(CBASE),$(COPTS_$(SYSTEMS))) \
@@ -60,7 +61,7 @@ all: build
 
 build: $(STAMP)
 
-# step 1: convert each image on its own, for each system (build/<name>.json and
+# step 1: convert each image on its own, for each system (build/pal/<name>.json and
 # build/ntsc/<name>.json record the results; make -j converts several at once). The
 # build skips images whose result is still valid, so touching vic2/*.py only reconverts
 # when a converter source really changed.
@@ -80,7 +81,7 @@ $(STAMP): $(JSONS) $(SOURCES) $(B)/.opts
 	@touch $@
 
 stampval = $(if $(filter %.opts,$(1)),$(OPTS),$(if $(filter build/ntsc/%,$(1)),$(COPTS_ntsc),$(COPTS_pal)))
-$(sort $(B)/.opts build/.copts build/ntsc/.copts): FORCE
+$(sort $(B)/.opts build/pal/.copts build/ntsc/.copts): FORCE
 	@mkdir -p $(@D)
 	@echo '$(call stampval,$@)' | cmp -s - $@ || echo '$(call stampval,$@)' > $@
 
@@ -116,8 +117,8 @@ clean:
 	rm -rf build
 
 help:
-	@echo "make [build]        convert input/ and assemble everything into build/ (-j8: in parallel)"
-	@echo "make convert        only convert the images that changed (build/<name>.v2i)"
+	@echo "make [build]        convert input/ and assemble everything into build/pal/ (-j8: in parallel)"
+	@echo "make convert        only convert the images that changed (build/pal/<name>.v2i)"
 	@echo "make verify         build and compare every image (and ask demo) with VICE"
 	@echo "make run            build and run the slideshow (same as run-slideshow; holds"
 	@echo "                    as many images as fit in one PRG)"
@@ -127,9 +128,9 @@ help:
 	@echo "make run-v2i        run the v2i-only demo (one image, space returns to BASIC)"
 	@echo "make run-v2t        run the v2t-only demo (text, KERNAL on, any key returns)"
 	@echo "make run-d64        boot the disk (.d64, or .d81 when the images need it)"
-	@echo "make clean          remove build/ (both PAL and NTSC builds)"
+	@echo "make clean          remove build/ (PAL, NTSC and dual builds)"
 	@echo "options: IMAGES='input/a.png ...' FRAME=1 AT=COLUMN,ROW LEADING=n AUTO=n HOLD=n DISK=d64|d81"
-	@echo "         NTSC=1 (for NTSC C64s; build/ntsc/ instead of build/, run targets use it too)"
+	@echo "         NTSC=1 (for NTSC C64s; build/ntsc/ instead of build/pal/, run targets use it too)"
 	@echo "         DUAL=1 (PAL and NTSC, and build/dual/: one disk for both; the run targets"
 	@echo "                 use it, in NTSC VICE with NTSC=1)"
 	@echo "         FAST=1 (run targets using the disk: instant loading)"
