@@ -1,7 +1,14 @@
-"""Cycle-level model of the PAL VIC-II bus stealing and a 6510 straight-line code generator.
+"""Cycle-level model of the VIC-II bus stealing and a 6510 straight-line code generator.
 
-Time is measured in absolute cycles: t = raster * 63 + (cycle - 1), cycle in 1..63,
-using the cycle numbering of Christian Bauer's vic-ii.txt (6569).
+Two video systems (set_standard): PAL (6569, 63 cycles x 312 lines) and NTSC (6567R8,
+65 cycles x 263 lines). Time is measured in absolute cycles: t = raster * CYCLES +
+(cycle - 1), cycle in 1..CYCLES, using the cycle numbering of Christian Bauer's
+vic-ii.txt. The sprite DMA cycles follow VICE's cycle tables (viciisc/vicii-chip-model.c):
+on the 6567R8 every sprite's p-access is one cycle later (sprites 0-2) or one earlier
+(4-7) than on the 6569, and sprite 3's moves to the end of the line before; its Y
+compares are one cycle later. Badlines (BA from cycle 12, c-accesses 15-54) and the X
+coordinate of each cycle up to the display's right edge (sprite X = 0 in cycle 13) are
+the same.
 
 The generator emits an unrolled, cycle-exact raster kernel:
   * a fixed prologue (initial register values, patched at the end),
@@ -11,8 +18,26 @@ The generator emits an unrolled, cycle-exact raster kernel:
     time window in which the write cycle must land) into the free bus cycles.
 """
 
-CYCLES = 63
-SPR_P = [58, 60, 62, 1, 3, 5, 7, 9]  # cycle of the p-access of each sprite
+STANDARDS = {
+    # cycles per line, lines per frame, cycle of each sprite's p-access (BA is low from 3
+    # cycles before it to 1 after), first cycle after the sprite Y compares (6569: 55
+    # and 56; 6567R8: 56 and 57)
+    "pal": dict(CYCLES=63, LINES=312, SPR_P=[58, 60, 62, 1, 3, 5, 7, 9], Y_AFTER=57, FPS=50),
+    "ntsc": dict(CYCLES=65, LINES=263, SPR_P=[59, 61, 63, 65, 2, 4, 6, 8], Y_AFTER=58, FPS=60),
+}
+SYSTEM_ID = {"pal": 0, "ntsc": 1}   # .v2i header byte, v2i_system in v2i.inc
+STANDARD = None
+
+
+def set_standard(name):
+    """Select the video system for everything below (module globals)."""
+    global STANDARD, CYCLES, LINES, SPR_P, Y_AFTER, FPS
+    STANDARD = name
+    v = STANDARDS[name]
+    CYCLES, LINES, SPR_P, Y_AFTER, FPS = v["CYCLES"], v["LINES"], v["SPR_P"], v["Y_AFTER"], v["FPS"]
+
+
+set_standard("pal")
 
 # instruction cycle patterns (R = read, W = write)
 OPS = {
@@ -33,6 +58,13 @@ def T(raster, cyc):
     return raster * CYCLES + (cyc - 1)
 
 
+def p_time(s, d):
+    """Time of the p-access of sprite s for its display line d: in the line before for
+    the sprites fetched at the end of a line."""
+    p = SPR_P[s]
+    return T(d - 1, p) if p > CYCLES // 2 else T(d, p)
+
+
 def raster_of(t):
     return t // CYCLES
 
@@ -46,15 +78,14 @@ class Vic:
 
     def __init__(self, badlines, sprite_lines):
         """badlines: iterable of raster lines; sprite_lines[s]: rasters on which sprite s is displayed."""
-        self.n = 313 * CYCLES + 200
+        self.n = (LINES + 1) * CYCLES + 200
         ba = bytearray(self.n)
         for r in badlines:
             for c in range(12, 55):
                 ba[T(r, c)] = 1
         for s, lines in enumerate(sprite_lines):
-            p = SPR_P[s]
             for d in lines:
-                tp = T(d - 1, p) if s <= 2 else T(d, p)
+                tp = p_time(s, d)
                 for t in range(tp - 3, tp + 2):
                     ba[t] = 1
         self.ba = ba

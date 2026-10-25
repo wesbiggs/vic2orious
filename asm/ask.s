@@ -28,6 +28,7 @@ start:  jsr v2i_init
         lda #<ask_img
         ldy #>ask_img
         jsr v2i_show
+        bcs fail
 .if FRAME
         lda #$10
         jsr v2i_frame
@@ -193,6 +194,22 @@ scan:   ldx #ASK_N - 1
 @hit:   clc
         rts
 @quit:  jsr v2i_exit
+        jmp ($a002)                     ; BASIC warm start
+
+fail:   pha                             ; v2i_show failed: say why, back to BASIC
+        jsr v2i_exit
+        pla
+        jsr v2i_errmsg
+        sta $fb
+        sty $fc
+        ldy #0
+:       lda ($fb),y
+        beq :+
+        jsr $ffd2                       ; CHROUT
+        iny
+        bne :-
+:       lda #13
+        jsr $ffd2
         jmp ($a002)                     ; BASIC warm start
 
 ; keyboard matrix position of the digits 1-9: CIA1 port A value, port B bit

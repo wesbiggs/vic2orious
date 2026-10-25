@@ -299,12 +299,12 @@ class Converter:
                 B = block_start(s, kk)
                 if B > RASTER0 + IMG_H + 2:
                     break
-                ty = sch.new_task(REG_Y[s], B - 1, T(B - 22, 57), T(B - 1, 54), "y%d.%d" % (s, kk))
+                ty = sch.new_task(REG_Y[s], B - 1, T(B - 22, timing.Y_AFTER), T(B - 1, 54),
+                                  "y%d.%d" % (s, kk))
                 fixed.setdefault(B - 21, []).append(ty)  # add early: EDF fills idle time with it
                 if slot_of(s, kk) != slot_of(s, kk - 1):
-                    p = timing.SPR_P[s]
-                    tp_old = T(B - 2, p) if s <= 2 else T(B - 1, p)
-                    tp_new = T(B - 1, p) if s <= 2 else T(B, p)
+                    tp_old = timing.p_time(s, B - 1)
+                    tp_new = timing.p_time(s, B)
                     tk = sch.new_task(PTR[s], slot_of(s, kk), tp_old + 1, tp_new - 1, "p%d.%d" % (s, kk))
                     sch._tighten(tk)
                     fixed.setdefault(timing.raster_of(tk.hi), []).append(tk)

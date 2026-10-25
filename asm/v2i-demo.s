@@ -19,6 +19,7 @@ start:  jsr v2i_init
         lda #<demo_img
         ldy #>demo_img
         jsr v2i_show
+        bcs fail                        ; not for this machine (PAL/NTSC)
 .if FRAME
         lda #$10                        ; white on black
         jsr v2i_frame
@@ -34,5 +35,21 @@ start:  jsr v2i_init
         bne @down
         jsr v2i_exit
         rts
+
+fail:   pha                             ; v2i_show failed: say why, back to BASIC
+        jsr v2i_exit
+        pla
+        jsr v2i_errmsg
+        sta $fb
+        sty $fc
+        ldy #0
+:       lda ($fb),y
+        beq :+
+        jsr $ffd2                       ; CHROUT
+        iny
+        bne :-
+:       lda #13
+        jsr $ffd2
+        jmp ($a002)                     ; BASIC warm start
 
         .include "v2i.inc"

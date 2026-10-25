@@ -1,10 +1,13 @@
 ; vic2orious disk slideshow: loads the .v2i images (and their text files) listed in
 ; diskshow.inc from disk one after another with the KERNAL and shows each one for
-; HOLD_FRAMES frames (up to 65535; 0: until space). Space shows the next image, RUN/STOP
-; returns to BASIC. While an image loads the text screen says which (the KERNAL loader
-; can't run beside a kernel, so the image can't stay up).
+; HOLD_SECS seconds (up to 1000, counted in frames: 50 a second on PAL, 60 on NTSC; 0:
+; until space). Space shows the next image, RUN/STOP returns to BASIC. While an image
+; loads the text screen says which (the KERNAL loader can't run beside a kernel, so the
+; image can't stay up).
+; Assembled with DUAL=1 it is for a disk with both PAL and NTSC images: it loads
+; <name>-p.v2i or <name>-n.v2i, whichever suits the machine (the texts are shared).
 
-        .include "diskshow.inc"         ; generated: SHOW_COUNT, HOLD_FRAMES, file names
+        .include "diskshow.inc"         ; generated: SHOW_COUNT, HOLD_SECS, file names
 
 CHROUT  = $ffd2
 SETLFS  = $ffba
@@ -14,11 +17,16 @@ GETIN   = $ffe4
 STOP    = $ffe1
 FNLEN   = $b7                           ; SETNAM's length and pointer
 FNADR   = $bb
-LOADBUF = $2000                         ; images are loaded here (up to $bfff)
-TXTBUF  = $1800                         ; text files are loaded here (after the program)
+LOADBUF = $2000                         ; images are loaded here (up to $97ff)
+TXTBUF  = $9800                         ; text files are loaded here (up to $9fff; below
+                                        ; the BASIC ROM, which is on when it is checked).
+                                        ; The program, with its names, ends below $2000
 
 .ifndef FRAME
 FRAME = 0                               ; 1: frame the images (build -b)
+.endif
+.ifndef DUAL
+DUAL = 0                                ; 1: image names get -p.v2i / -n.v2i
 .endif
 FRAME_COL = $10                         ; frame cells: white on black
 frame   = $06                           ; frames shown, low byte
@@ -41,13 +49,41 @@ vptr    = $fb                           ; 2 bytes
 start:  lda #0
         sta cur
         sta fails
+        sta hold
+        sta hold+1
+        jsr v2i_detect                  ; hold = HOLD_SECS * frames per second
+        ldy #50
+        lda v2i_system
+        cmp #V2I_NTSC
+        bne :+
+        ldy #60
+:       sty fps
+        lda #<HOLD_SECS
+        sta vptr
+        lda #>HOLD_SECS
+        sta vptr+1
+@mul:   lda vptr
+        ora vptr+1
+        beq load
+        clc
+        lda hold
+        adc fps
+        sta hold
+        bcc :+
+        inc hold+1
+:       lda vptr
+        bne :+
+        dec vptr+1
+:       dec vptr
+        jmp @mul
+
 load:   lda #<msg_loading
         ldy #>msg_loading
         jsr print
         ldx cur
         lda name_lo,x
         ldy name_hi,x
-        jsr fname
+        jsr iname
         ldy #0                          ; print the name
 :       cpy FNLEN
         beq :+
@@ -105,7 +141,6 @@ skip:   inc fails
 quit:   jmp ($a002)                     ; BASIC warm start
 
 show:   lda #0
-        sta fails
         sta frame
         sta frameh
         sta req
@@ -118,6 +153,17 @@ show:   lda #0
         lda #<LOADBUF
         ldy #>LOADBUF
         jsr v2i_show
+        bcc :+
+        pha                             ; not for this machine (PAL/NTSC)
+        jsr v2i_exit
+        pla
+        jsr v2i_errmsg
+        jsr print
+        lda #13
+        jsr CHROUT
+        jmp skip
+:       lda #0
+        sta fails
 .if FRAME
         lda #FRAME_COL
         jsr v2i_frame
@@ -144,21 +190,20 @@ advance:
 :       stx cur
         jmp load
 
-hook:
-.if HOLD_FRAMES
+hook:   lda hold                        ; 0: until space
+        ora hold+1
+        beq @keys
         inc frame
         bne :+
         inc frameh
-:       lda frame                       ; frameh/frame >= HOLD_FRAMES: next image
-        cmp #<HOLD_FRAMES
+:       lda frame                       ; frameh/frame >= hold: next image
+        cmp hold
         lda frameh
-        sbc #>HOLD_FRAMES
-        bcc :+
+        sbc hold+1
+        bcc @keys
         lda #1
         sta req
-:
-.endif
-        lda #$7f                        ; keyboard row 7: space = bit 4, RUN/STOP = bit 7
+@keys:  lda #$7f                        ; keyboard row 7: space = bit 4, RUN/STOP = bit 7
         sta $dc00
         lda $dc01
         and #$90
@@ -170,6 +215,36 @@ hook:
 :       stx keyprev
         rts
 
+iname:                                  ; SETNAM for the image whose name is at A/Y
+.if DUAL
+        sta vptr                        ; name + "-P.V2I" or "-N.V2I" in namebuf
+        sty vptr+1
+        ldy #0
+        lda (vptr),y
+        tax
+:       iny
+        lda (vptr),y
+        sta namebuf-1,y
+        dex
+        bne :-
+        ldx #0
+        lda v2i_system
+        cmp #V2I_NTSC
+        bne :+
+        ldx #8
+:       lda suffix,x
+        sta namebuf,y
+        inx
+        iny
+        txa
+        and #7
+        cmp #6
+        bne :-
+        tya                             ; (copied up to suffix index 6 or 14)
+        ldx #<namebuf
+        ldy #>namebuf
+        jmp SETNAM
+.endif
 fname:  sta vptr                        ; SETNAM with the length-prefixed name at A/Y
         sty vptr+1
         ldy #0
@@ -206,7 +281,13 @@ print:  sta vptr                        ; print zero-terminated string at A/Y
         bne @p
 @done:  rts
 
-magic:  .byte "V2I", 1
+.if DUAL
+suffix: .byte "-P.V2I", 0, 0, "-N.V2I"
+namebuf: .res 16
+.endif
+hold:   .word 0                         ; frames per image (0: until space)
+fps:    .byte 0
+magic:  .byte "V2I", 2
 tmagic: .byte "V2T", 3
 msg_loading:
         .byte "LOADING ", 0
@@ -220,4 +301,4 @@ msg_none:
         .include "v2i.inc"
         .include "v2t.inc"
         .data                           ; the end of the program (the names are data)
-        .assert * <= TXTBUF, error, "diskshow overlaps the text buffer"
+        .assert * <= LOADBUF, error, "diskshow overlaps the image buffer"

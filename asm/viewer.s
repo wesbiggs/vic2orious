@@ -1,6 +1,8 @@
 ; vic2orious viewer: loads a .v2i image from disk with the KERNAL and shows it.
 ; If a text file named like the image (first 12 characters + ".TXT") exists, it is drawn
 ; next to the image. Space returns to the file prompt; an empty file name exits to BASIC.
+; Assembled with DUAL=1 (a disk with PAL and NTSC images) it first tries the name +
+; "-p.v2i" or "-n.v2i", whichever suits the machine, then the name as typed.
 
 CHRIN   = $ffcf
 CHROUT  = $ffd2
@@ -13,6 +15,9 @@ TXTBUF  = $1800                         ; text files are loaded here (after the 
 
 .ifndef FRAME
 FRAME = 0                               ; 1: frame the images (build -b)
+.endif
+.ifndef DUAL
+DUAL = 0
 .endif
 FRAME_COL = $10                         ; frame cells: white on black
 namelen = $0c
@@ -49,6 +54,40 @@ prompt: lda #<msg_prompt
 @load:  lda #<msg_loading
         ldy #>msg_loading
         jsr print
+.if DUAL
+        lda namelen                     ; name + "-P.V2I" / "-N.V2I", if that fits in 16
+        cmp #11
+        bcs @plain
+        jsr v2i_detect
+        ldy #0
+:       lda name,y
+        sta namebuf,y
+        iny
+        cpy namelen
+        bne :-
+        ldx #0
+        lda v2i_system
+        cmp #V2I_NTSC
+        bne :+
+        ldx #6
+:       lda suffix,x
+        sta namebuf,y
+        iny
+        inx
+        cpx #6
+        beq :+
+        cpx #12
+        bne :-
+:       tya
+        ldx #<namebuf
+        ldy #>namebuf
+        jsr SETNAM
+        ldx #<LOADBUF
+        ldy #>LOADBUF
+        jsr loadfile
+        bcc @check
+@plain:
+.endif
         lda namelen
         ldx #<name
         ldy #>name
@@ -105,6 +144,16 @@ view:   jsr v2i_init
         lda #<LOADBUF
         ldy #>LOADBUF
         jsr v2i_show
+        bcc :+
+        pha                             ; not for this machine (PAL/NTSC)
+        jsr v2i_exit
+        pla
+        jsr v2i_errmsg
+        jsr print
+        lda #13
+        jsr CHROUT
+        jmp prompt
+:
 .if FRAME
         lda #FRAME_COL
         jsr v2i_frame
@@ -153,7 +202,7 @@ print:  sta vptr                        ; print zero-terminated string at A/Y
         bne @p
 @done:  rts
 
-magic:  .byte "V2I", 1
+magic:  .byte "V2I", 2
 tmagic: .byte "V2T", 3
 txtext: .byte ".TXT"
 msg_prompt:
@@ -165,6 +214,10 @@ msg_ioerr:
 msg_notv2i:
         .byte "NOT A V2I FILE", 13, 0
 name:   .res 17
+.if DUAL
+suffix: .byte "-P.V2I", "-N.V2I"
+namebuf: .res 16
+.endif
 
         .include "v2i.inc"
         .include "v2t.inc"

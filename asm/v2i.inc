@@ -3,8 +3,13 @@
 ; (A/Y = address: A low, Y high):
 ;
 ;   v2i_init       take over the machine (ROMs and CIA interrupts off, VIC bank 3, own
-;                  IRQ/NMI vectors); saves the VIC and CIA2 bank registers for v2i_exit
-;   v2i_show       A/Y = .v2i: unpack it into VIC bank 3 (stopped only). C=1: not a .v2i
+;                  IRQ/NMI vectors); saves the VIC and CIA2 bank registers for v2i_exit;
+;                  detects PAL/NTSC (v2i_detect)
+;   v2i_detect     v2i_system = V2I_PAL, V2I_NTSC or V2I_OTHER (also before v2i_init)
+;   v2i_show       A/Y = .v2i: unpack it into VIC bank 3 (stopped only). C=1: not shown,
+;                  A = V2I_ERR_FORMAT (not a version 2 .v2i) or V2I_ERR_SYSTEM (made for
+;                  the other video system, or an unsupported VIC-II)
+;   v2i_errmsg     A = error from v2i_show: A/Y = zero-terminated message (PETSCII)
 ;   v2i_frame      A = colour: frame around the image (needs the ring of cells around it)
 ;   v2i_start      raster IRQ on: the image is displayed, v2i_hook is called every frame
 ;   v2i_stop       raster IRQ off, sprites off, screen blank
@@ -26,7 +31,16 @@ V2I_H_BLEN = 10
 V2I_H_SLEN = 12
 V2I_H_BDST = 16
 V2I_H_SDST = 18
-V2I_H_SIZE = 24
+V2I_H_SYS  = 24
+V2I_H_SIZE = 26
+
+; video systems (v2i_system, header byte V2I_H_SYS); kernels are made for one of them
+V2I_PAL    = 0                          ; 6569 (and 8565): 63 cycles x 312 lines
+V2I_NTSC   = 1                          ; 6567R8 (and 8562): 65 cycles x 263 lines
+V2I_OTHER  = $ff                        ; anything else (6567R56A, ...): not supported
+
+V2I_ERR_FORMAT = 1
+V2I_ERR_SYSTEM = 2
 
 ; zero page
 v2i_save_a = V2I_ZP + 0                 ; IRQ register save (keep in zero page: the kernel
@@ -55,6 +69,7 @@ v2i_init:
         sta v2i_savedd00
         lda $dd02
         sta v2i_savedd02
+        jsr v2i_detect
         lda #$7f
         sta $dc0d
         sta $dd0d
@@ -85,6 +100,25 @@ v2i_init:
         sta $dc02                       ; CIA1 port A output (keyboard columns)
         lda #0
         sta $dc03
+        rts
+
+; ---- v2i_system from the last raster line (up to one frame; any time, KERNAL on or off)
+v2i_detect:
+        php
+        sei
+@d0:    lda $d012                       ; wait until the line counter goes back (old -
+@d1:    cmp $d012                       ; new >= 0 only there, also across $ff -> $100)
+        beq @d1
+        bmi @d0
+        ldx #V2I_PAL
+        cmp #<311
+        beq @sys
+        ldx #V2I_NTSC
+        cmp #<262
+        beq @sys
+        ldx #V2I_OTHER
+@sys:   stx v2i_system
+        plp
         rts
 
 ; ---- start/stop the raster interrupt that runs the kernel
@@ -164,15 +198,27 @@ v2i_rts:
         rts
 
 ; ---- unpack the image at A/Y into VIC bank 3 and point the IRQ at its kernel
+v2i_badfmt:
+        lda #V2I_ERR_FORMAT
+        sec
+        rts
+v2i_badsys:
+        lda #V2I_ERR_SYSTEM
+        sec
+        rts
 v2i_show:
         sta v2i_hdr
         sty v2i_hdr+1
         ldy #3                          ; "V2I" + version
 :       lda (v2i_hdr),y
         cmp v2i_magic,y
-        bne @bad
+        bne v2i_badfmt
         dey
         bpl :-
+        ldy #V2I_H_SYS                  ; made for this machine?
+        lda (v2i_hdr),y
+        cmp v2i_system
+        bne v2i_badsys
         ldy #4                          ; size and position
 :       lda (v2i_hdr),y
         sta v2i_cols-4,y
@@ -234,8 +280,28 @@ v2i_show:
         sta $01
         clc
         rts
-@bad:   sec
+
+; ---- A = error from v2i_show: A/Y = a message for it (zero-terminated PETSCII)
+v2i_errmsg:
+        ldx #0
+        cmp #V2I_ERR_SYSTEM
+        bne @ret
+        ldx #2
+        lda v2i_system
+        beq @ret                        ; PAL machine: the image is for NTSC
+        ldx #4
+        cmp #V2I_NTSC
+        beq @ret
+        ldx #6
+@ret:   lda v2i_msgs,x
+        ldy v2i_msgs+1,x
         rts
+v2i_msgs:  .word v2i_msg_fmt, v2i_msg_ntsc, v2i_msg_pal, v2i_msg_vic
+v2i_msg_fmt:  .byte "NOT A V2I FILE (VERSION 2)", 0
+v2i_msg_ntsc: .byte "THIS IMAGE IS FOR AN NTSC C64", 0
+v2i_msg_pal:  .byte "THIS IMAGE IS FOR A PAL C64", 0
+v2i_msg_vic:  .byte "UNSUPPORTED VIC-II (PAL 6569/8565 OR NTSC 6567R8/8562 ONLY)", 0
+
 
 ; ---- frame in the ring of cells around the image (rows fy0..fy1, columns fx0..fx1),
 ; rings white, white, black, white from the outside in, in cell colour A ($10: white on
@@ -442,7 +508,8 @@ v2i_unrle:
 
 ; ---- data and state
 
-v2i_magic: .byte "V2I", 1
+v2i_magic: .byte "V2I", 2
+v2i_system: .byte V2I_PAL               ; set by v2i_init
 v2i_hook:  .word v2i_rts                ; called after the kernel every frame, may use A/X/Y
 v2i_ticks: .byte 0                      ; incremented every frame
 

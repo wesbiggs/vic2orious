@@ -16,9 +16,11 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   line covers the remaining pixels with at most 8 single-colour 24-pixel "spans" (`cover`:
   exact max-pixels DP, memoised) and assigns them to the 8 sprites (DP over sprite subsets,
   minimising register writes). `Geometry` holds size and screen placement.
-- `vic2/timing.py`: cycle model of the PAL VIC-II bus stealing (badlines, sprite DMA, the 3
+- `vic2/timing.py`: cycle model of the VIC-II bus stealing (badlines, sprite DMA, the 3
   write cycles allowed after BA goes low), the kernel code generator (prologue, sync phase)
-  and the EDF write scheduler with per-line checkpoints.
+  and the EDF write scheduler with per-line checkpoints. `set_standard("pal"|"ntsc")`
+  switches module globals (`CYCLES`, `LINES`, `SPR_P`, `Y_AFTER`, `FPS`) for the whole
+  process; `build --ntsc` calls it before converting.
 - `vic2/build.py`: CLI. Converts images, writes `.v2i`/`.txt` files, generates
   `build/images.inc`, `build/diskshow.inc`, `build/ask.inc` and `build/font.inc`,
   assembles with cl65, makes the D64 (or D81), and optionally verifies in VICE. The file
@@ -82,7 +84,28 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   without its pointer (otherwise old sprite data repeats below the image).
 - Pixel timing: sprite X coordinate x is drawn in cycle `PIX_C0 + x // 8` (13), with
   `MARGIN = 1` cycle on each side of every edge. Validated against VICE; changing either
-  needs a `--verify` run.
+  needs a `--verify` run. The same on NTSC (X = 0 falls in cycle 13 on both chips).
+- PAL/NTSC: a kernel only works on the system it was made for (6569/8565: 63 x 312;
+  6567R8/8562: 65 x 263), and the converted data differs too, since the scheduler decides
+  which spans fit. NTSC sprite p-accesses are at cycles 59, 61, 63, 65, 2, 4, 6, 8 (sprite
+  3 in the line before, so `p_time` decides the line by cycle, not by sprite number), Y
+  compares at 56/57; badlines and pixel timing as on PAL. Source: VICE
+  `src/viciisc/vicii-chip-model.c` (`cycle_tab_pal`/`cycle_tab_ntsc`; BA low from 3
+  cycles before a p-access to 1 after). `.v2i` version 2 has the system in header byte
+  24; `v2i_init` detects the machine from its last raster line (`$37` PAL, `$06` NTSC)
+  and `v2i_show` refuses a file for the other system (hosts print `v2i_errmsg`). NTSC
+  builds go to `build/ntsc/` (`NTSC=1` in make, VICE `-ntsc`); `--verify` checks either.
+- Dual disk (`build --dual`, `make DUAL=1`): `build_system` runs for PAL and NTSC (cached
+  conversions, own disks), then `build_dual` writes `build/dual/` with diskshow and viewer
+  assembled `DUAL=1`: they call `v2i_detect` (KERNAL on) and add `-P.V2I`/`-N.V2I` to the
+  image names (base cut to 10 by `dual_base`); texts are shared (layout depends on the
+  position only). `--verify` with `--dual` also boots the dual diskshow on both systems.
+  diskshow's hold time is `HOLD_SECS`, multiplied by 50 or 60 at startup.
+- Buffers: images load at `$2000` (build asserts a `.v2i` ends below `$9800`); diskshow
+  loads texts at `$9800` (its name tables grow with the image count, so it may use up to
+  `$1fff`), the viewer at `$1800`. Not `$a000-$bfff`: the players check the header with
+  the BASIC ROM still on, which hides that RAM (a text buffer at `$b800` silently lost
+  every story).
 - Lines that cannot be done exactly are not skipped: with more than 8 spans needed the
   cover keeps the most pixels; when the writes do not fit, `fit_line` searches best-first
   (up to `FIT_TRIES` schedules) for the set of dropped spans losing the fewest pixels.
@@ -132,7 +155,7 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   attached disk needs `-autostartprgmode 1` (otherwise VICE looks for it on the disk).
   The viewer test pattern: `-8 build/vic2orious.d64 -autostart build/viewer.prg -keybuf
   'princess\n'`.
-- Memory: the slideshow PRG must fit `$0801-$bfff` (about 46K); each image is 9-15K, so
+- Memory (see also Buffers above): the slideshow PRG must fit `$0801-$bfff` (about 46K); each image is 9-15K, so
   3-4 images. With more, `assemble_slideshow` keeps the longest prefix that assembles;
   `diskshow` gets all of them (names baked in from `build/diskshow.inc`, loaded like the
   viewer, text screen shown while loading; `HOLD` seconds per image, 16-bit frame count,
@@ -162,6 +185,9 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   24), random restarts in the cell search (too slow for little gain).
 - Text: fixed 8x8 ROM glyphs first, then the proportional ROM font (about 20% more text per
   line; letters average 6.8 px because of the 2 px strokes).
+- NTSC sprite DMA from Bauer's vic-ii.txt alone: its 6567R8 diagram is abbreviated and
+  reads as sprites 0-2 at 60/62/64 with 3-7 unchanged; that gave ~2300 wrong pixels in
+  VICE, and guessed shifts did not converge. VICE's cycle tables (above) gave 0.
 
 ## Ideas not done yet
 

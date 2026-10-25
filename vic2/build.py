@@ -1,8 +1,11 @@
 """Convert images to .v2i files, assemble the slideshow, viewer and demos, build a D64
 and optionally verify in VICE.
 
-usage: python3 -m vic2.build [-b] [--at COLUMN,ROW] [--disk d64|d81] [--convert-only]
-                             [--force] [--verify] [--run] [images...]
+usage: python3 -m vic2.build [-b] [--at COLUMN,ROW] [--ntsc] [--disk d64|d81]
+                             [--convert-only] [--force] [--verify] [--run] [images...]
+
+Kernels are cycle exact for one video system: PAL by default, NTSC (6567R8) with --ntsc.
+An NTSC build goes to build/ntsc/ instead of build/, so both can be kept.
 
 Each image is converted once: build/<name>.json records what the conversion depended on,
 and later builds reuse the .v2i while that is unchanged (--force converts anyway).
@@ -23,16 +26,16 @@ import sys
 
 from PIL import Image
 
-from . import convert
+from . import convert, timing
 from .ask import Ask
 from .font import Font
 from .palette import load_indexed, save_indexed, PEPTO, nearest, load_vpl
 from .screen import Screen
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BUILD = os.path.join(ROOT, "build")
+BUILD = os.path.join(ROOT, "build")         # build/ntsc with --ntsc (see main)
 ASM = os.path.join(ROOT, "asm")
-V2I_VERSION = 1
+V2I_VERSION = 2
 V2I_LOAD = 0x2000
 V2T_LOAD = 0x1800
 V2T_VERSION = 3
@@ -60,14 +63,14 @@ def rle_zero(data):
     return out + b"\0\0"
 
 
-CACHE_VERSION = 1             # bump when the .v2i/.txt packing below changes
+CACHE_VERSION = 2             # bump when the .v2i/.txt packing below changes
 CACHE_SOURCES = ("convert.py", "timing.py", "palette.py", "font.py")
 
 
 def cache_key(path, frame, leading, at):
     """Everything a conversion depends on: the image, its text, the options and the
     converter sources."""
-    h = hashlib.sha1(repr((CACHE_VERSION, frame, leading, at)).encode())
+    h = hashlib.sha1(repr((CACHE_VERSION, timing.STANDARD, frame, leading, at)).encode())
     txt = os.path.splitext(path)[0] + ".txt"
     for f in [path, txt] + [os.path.join(ROOT, "vic2", s) for s in CACHE_SOURCES]:
         if os.path.exists(f):             # contents only: the same file may be named
@@ -169,7 +172,10 @@ def convert_image(path, log=print, frame=False, leading=TEXT_LEADING, at=None, f
     for v in [len(d) for d in packed] + [0xE000 + 320 * g.row0, 0xC000 + 40 * g.row0,
                                          len(bad_lines), min(wrong_px, 0xFFFF)]:
         hdr += v.to_bytes(2, "little")
-    assert len(hdr) == 24
+    hdr += bytes((timing.SYSTEM_ID[timing.STANDARD], 0))
+    assert len(hdr) == 26
+    assert len(hdr) + sum(len(d) for d in packed) <= 0x9800 - V2I_LOAD, \
+        "%s: .v2i too big for the players' buffer ($2000-$97ff)" % name
     v2i = os.path.join(BUILD, name + ".v2i")
     with open(v2i, "wb") as f:
         f.write(V2I_LOAD.to_bytes(2, "little") + hdr + b"".join(packed))
@@ -213,17 +219,18 @@ def write_inc(infos, auto_frames):
         f.write("\n".join(lines) + "\n")
 
 
-def write_diskshow_inc(infos, hold_frames):
-    """File names for asm/diskshow.s, as c1541 writes them (see disk_files)."""
+def write_diskshow_inc(infos, hold_secs, dual=False):
+    """File names for asm/diskshow.s, as c1541 writes them (see make_disk). dual: the image
+    names without their -p.v2i / -n.v2i (diskshow adds the one that suits the machine)."""
     def entry(label, name):
         return "%s: .byte %d,%s" % (label, len(name), ",".join("$%02x" % petscii(c) for c in name))
-    lines = ["SHOW_COUNT = %d" % len(infos), "HOLD_FRAMES = %d" % hold_frames, "", "        .data"]
+    lines = ["SHOW_COUNT = %d" % len(infos), "HOLD_SECS = %d" % hold_secs, "", "        .data"]
     lines.append("name_lo: .byte %s" % ",".join("<dsn%d" % i for i in range(len(infos))))
     lines.append("name_hi: .byte %s" % ",".join(">dsn%d" % i for i in range(len(infos))))
     lines.append("tname_lo: .byte %s" % ",".join("<dst%d" % i if f["txt"] else "0" for i, f in enumerate(infos)))
     lines.append("tname_hi: .byte %s" % ",".join(">dst%d" % i if f["txt"] else "0" for i, f in enumerate(infos)))
     for i, inf in enumerate(infos):
-        lines.append(entry("dsn%d" % i, disk_name(inf["name"])))
+        lines.append(entry("dsn%d" % i, dual_base(inf["name"]) if dual else disk_name(inf["name"])))
         if inf["txt"]:
             lines.append(entry("dst%d" % i, text_disk_name(inf["name"])))
     with open(os.path.join(BUILD, "diskshow.inc"), "w") as f:
@@ -289,6 +296,14 @@ def disk_name(name):
 
 def text_disk_name(name):
     return disk_name(name)[:12] + ".TXT"
+
+
+def dual_base(name):
+    """Image name on a dual disk, before -P.V2I / -N.V2I (16 characters in all)."""
+    return disk_name(name)[:10]
+
+
+SUFFIX = {"pal": "-P", "ntsc": "-N"}
 
 
 def petscii(c):
@@ -378,7 +393,7 @@ def diskshow_screenshot(prg, disk, png, cycles):
     """Like vice_screenshot, with disk in drive 8 (true drive emulation)."""
     if os.path.exists(png):
         os.remove(png)
-    cmd = ["x64sc", "-default", "-pal", "-warp", "-sounddev", "dummy", "+sound",
+    cmd = ["x64sc", "-default", "-" + timing.STANDARD, "-warp", "-sounddev", "dummy", "+sound",
            "-VICIIfilter", "0", "-VICIIextpal", "-VICIIpalette", "pepto-pal.vpl"]
     if disk.endswith(".d81"):
         cmd += ["-drive8type", "1581"]
@@ -391,7 +406,7 @@ def diskshow_screenshot(prg, disk, png, cycles):
 def vice_screenshot(prg, png, cycles=10_000_000):
     if os.path.exists(png):
         os.remove(png)
-    cmd = ["x64sc", "-default", "-pal", "-warp", "-sounddev", "dummy", "+sound",
+    cmd = ["x64sc", "-default", "-" + timing.STANDARD, "-warp", "-sounddev", "dummy", "+sound",
            "-VICIIfilter", "0", "-VICIIextpal", "-VICIIpalette", "pepto-pal.vpl",
            "-autostartprgmode", "1", "-limitcycles", str(cycles), "-exitscreenshot", png, prg]
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
@@ -491,12 +506,18 @@ def v2t_demo_screen(inf):
     return scr
 
 
-def check_in_vice(prg, png, exp, label):
-    """Screenshot prg in VICE and compare with exp."""
+def check_in_vice(prg, png, exp, label, retry=True):
+    """Screenshot prg in VICE and compare with exp. A failed check runs once more: VICE's
+    autostart now and then leaves the machine at the READY prompt (the kernels are
+    deterministic, so a real fault fails both times)."""
     if not vice_screenshot(prg, png):
         print("  %s: no screenshot" % label)
         return False
     res = compare_screenshot(png, exp)
+    if (res is None or res[2]) and retry:
+        print("  %s: %s, running it again" % (
+            label, "nothing found" if res is None else "%d differing pixels" % len(res[2])))
+        return check_in_vice(prg, png, exp, label, retry=False)
     if res is None:
         print("  %s: nothing found in the screenshot" % label)
         return False
@@ -507,56 +528,30 @@ def check_in_vice(prg, png, exp, label):
     return not wrong
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("images", nargs="*")
-    ap.add_argument("-b", "--frame", action="store_true",
-                    help="frame the images: place them at row 1, column 1 (where they fit) and "
-                         "build the slideshow and viewer to draw a frame around them")
-    ap.add_argument("--verify", action="store_true", help="screenshot each image in VICE and compare")
-    ap.add_argument("--run", action="store_true", help="launch the slideshow in VICE")
-    ap.add_argument("--leading", type=int, default=TEXT_LEADING,
-                    help="blank pixel lines between text lines (default %d)" % TEXT_LEADING)
-    ap.add_argument("--at", metavar="COLUMN,ROW",
-                    help="place the images at this character column and row (default 0,0; 1,1 "
-                         "with -b)")
-    ap.add_argument("--auto", type=int, default=250,
-                    help="frames per image (max 255) in the slideshow (0: until space)")
-    ap.add_argument("--hold", type=int, default=15,
-                    help="seconds per image (max 1300) in diskshow, not counting the loading "
-                         "(0: until space)")
-    ap.add_argument("--disk", choices=sorted(DISKS),
-                    help="disk image type (default: d64 if everything fits, else d81)")
-    ap.add_argument("--convert-only", action="store_true",
-                    help="convert the images and build nothing else")
-    ap.add_argument("--force", action="store_true", help="convert images even if unchanged")
-    a = ap.parse_args()
-    if not 0 <= a.auto <= 255:
-        ap.error("--auto must be 0..255")
-    if not 0 <= a.hold <= 1300:
-        ap.error("--hold must be 0..1300")
-    if not 0 <= a.leading <= 64:
-        ap.error("--leading must be 0..64")
-    at = None
-    if a.at:
-        try:
-            at = tuple(int(v) for v in a.at.split(","))
-            assert len(at) == 2
-        except (ValueError, AssertionError):
-            ap.error("--at takes COLUMN,ROW")
-    images = a.images or sorted(glob.glob(os.path.join(ROOT, "input", "*.png")))
+def use_system(standard, dual=False):
+    """Kernels for standard from here on, and its build directory (build/, build/ntsc/;
+    build/dual/ for the dual disk's own files)."""
+    global BUILD
+    timing.set_standard(standard)
+    BUILD = os.path.join(ROOT, "build", *(["dual"] if dual else ["ntsc"] if standard == "ntsc" else []))
     os.makedirs(BUILD, exist_ok=True)
+
+
+def build_system(a, images, at, standard):
+    """Convert the images for one video system and build its programs and disk (and verify
+    them). Returns (ok, the built files by role)."""
+    use_system(standard)
     infos = [convert_image(p, frame=a.frame, leading=a.leading, at=at, force=a.force)
              for p in images]
     if a.convert_only:
-        return 0
+        return True, None
     prg = os.path.join(BUILD, "slideshow.prg")
     in_prg = assemble_slideshow(prg, infos, a.auto, a.frame)
     if in_prg < len(infos):
         print("slideshow.prg holds the first %d of the %d images; diskshow loads them all from disk"
               % (in_prg, len(infos)))
     diskshow = os.path.join(BUILD, "diskshow.prg")
-    write_diskshow_inc(infos, a.hold * 50)
+    write_diskshow_inc(infos, a.hold)
     assemble(diskshow, "diskshow.s", frame=a.frame)
     viewer = os.path.join(BUILD, "viewer.prg")
     assemble(viewer, "viewer.s", frame=a.frame)
@@ -600,7 +595,7 @@ def main():
     if a.verify:
         font = Font()
         for inf in infos:
-            write_inc([inf], 255)
+            write_inc([inf], 0)             # held: no re-show during the screenshot
             one = os.path.join(BUILD, "verify_%s.prg" % inf["name"])
             assemble(one, frame=a.frame)
             png = os.path.join(BUILD, "vice_%s.png" % inf["name"])
@@ -640,12 +635,133 @@ def main():
         else:
             print("  diskshow: no screenshot")
             ok = False
-        write_diskshow_inc(infos, a.hold * 50)
+        write_diskshow_inc(infos, a.hold)
         assemble(diskshow, "diskshow.s", frame=a.frame)
         assemble_slideshow(prg, infos, a.auto, a.frame)
-    if a.run:
-        subprocess.Popen(["x64sc", "-pal", "-VICIIextpal", "-VICIIpalette", "pepto-pal.vpl",
-                          "-autostartprgmode", "1", prg],
+    return ok, dict(infos=infos, slideshow=prg, diskshow=diskshow, viewer=viewer, asks=asks,
+                    demos=demos, disk=disk)
+
+
+def build_dual(a, res):
+    """build/dual/vic2orious.d81 (or .d64): the PAL and the NTSC images and programs, with
+    one diskshow and one viewer that pick the files that suit the machine."""
+    pal, ntsc = res["pal"], res["ntsc"]
+    use_system("pal", dual=True)
+    diskshow = os.path.join(BUILD, "diskshow.prg")
+    write_diskshow_inc(pal["infos"], a.hold, dual=True)
+    assemble(diskshow, "diskshow.s", frame=a.frame, defines=["DUAL=1"])
+    viewer = os.path.join(BUILD, "viewer.prg")
+    assemble(viewer, "viewer.s", frame=a.frame, defines=["DUAL=1"])
+    files = [(viewer, "viewer"), (diskshow, "diskshow")]
+    for std in ("pal", "ntsc"):
+        files.append((res[std]["slideshow"], "slideshow" + SUFFIX[std]))
+    for p, n in zip(pal["infos"], ntsc["infos"]):
+        files.append((p["v2i"], dual_base(p["name"]) + "-P.V2I"))
+        files.append((n["v2i"], dual_base(n["name"]) + "-N.V2I"))
+        if p["txt"]:                    # text layout depends on the position only: shared
+            files.append((p["txt"], text_disk_name(p["name"])))
+    for std in ("pal", "ntsc"):
+        for ask, out in res[std]["asks"]:
+            files.append((out, "ask " + disk_name(ask.info["name"])[:10] + SUFFIX[std]))
+    for std in ("pal", "ntsc"):
+        for out, name in res[std]["demos"]:
+            if name == "v2i demo":          # the v2t demo has no kernel: one copy
+                files.append((out, name + SUFFIX[std]))
+    files += [d for d in pal["demos"] if d[1] != "v2i demo"]
+    disk = make_disk(files, a.disk)
+    print("built %s and %s for both PAL and NTSC, and %s" % (diskshow, viewer, disk))
+    print("disk files: " + ", ".join(name.lower() for _, name in files))
+    ok = True
+    if a.verify:
+        # the full disk, diskshow holding its first image, on both systems
+        one = os.path.join(BUILD, "verify_diskshow.prg")
+        write_diskshow_inc(pal["infos"], 0, dual=True)
+        assemble(one, "diskshow.s", frame=a.frame, defines=["DUAL=1"])
+        for std in ("pal", "ntsc"):
+            inf = res[std]["infos"][0]
+            timing.set_standard(std)
+            png = os.path.join(BUILD, "vice_diskshow_%s.png" % std)
+            size = inf["size"] + (os.path.getsize(inf["txt"]) if inf["txt"] else 0)
+            label = "dual diskshow on %s" % std.upper()
+            if diskshow_screenshot(one, disk, png, 40_000_000 + 8_000 * size):
+                r = compare_screenshot(png, expected_screen(inf).pixels())
+                n = len(r[2]) if r else -1
+                print("  %s: VICE output vs model: %d differing pixels" % (label, n))
+                ok &= n == 0
+            else:
+                print("  %s: no screenshot" % label)
+                ok = False
+        timing.set_standard("pal")
+    return ok, disk
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("images", nargs="*")
+    ap.add_argument("-b", "--frame", action="store_true",
+                    help="frame the images: place them at row 1, column 1 (where they fit) and "
+                         "build the slideshow and viewer to draw a frame around them")
+    ap.add_argument("--verify", action="store_true", help="screenshot each image in VICE and compare")
+    ap.add_argument("--run", action="store_true", help="launch the slideshow in VICE")
+    ap.add_argument("--leading", type=int, default=TEXT_LEADING,
+                    help="blank pixel lines between text lines (default %d)" % TEXT_LEADING)
+    ap.add_argument("--at", metavar="COLUMN,ROW",
+                    help="place the images at this character column and row (default 0,0; 1,1 "
+                         "with -b)")
+    ap.add_argument("--auto", type=int, default=250,
+                    help="frames per image (max 255) in the slideshow (0: until space)")
+    ap.add_argument("--hold", type=int, default=15,
+                    help="seconds per image (max 1000) in diskshow, not counting the loading "
+                         "(0: until space)")
+    ap.add_argument("--ntsc", action="store_true",
+                    help="make the kernels for NTSC C64s (6567R8) instead of PAL; builds into "
+                         "build/ntsc/")
+    ap.add_argument("--dual", action="store_true",
+                    help="build for both PAL and NTSC (build/, build/ntsc/) and a disk with "
+                         "both, whose diskshow and viewer pick the files for the machine "
+                         "(build/dual/)")
+    ap.add_argument("--disk", choices=sorted(DISKS),
+                    help="disk image type (default: d64 if everything fits, else d81)")
+    ap.add_argument("--convert-only", action="store_true",
+                    help="convert the images and build nothing else")
+    ap.add_argument("--force", action="store_true", help="convert images even if unchanged")
+    a = ap.parse_args()
+    if a.dual and a.ntsc:
+        ap.error("--dual builds both systems; leave out --ntsc")
+    if not 0 <= a.auto <= 255:
+        ap.error("--auto must be 0..255")
+    if not 0 <= a.hold <= 1000:
+        ap.error("--hold must be 0..1000")
+    if not 0 <= a.leading <= 64:
+        ap.error("--leading must be 0..64")
+    at = None
+    if a.at:
+        try:
+            at = tuple(int(v) for v in a.at.split(","))
+            assert len(at) == 2
+        except (ValueError, AssertionError):
+            ap.error("--at takes COLUMN,ROW")
+    images = a.images or sorted(glob.glob(os.path.join(ROOT, "input", "*.png")))
+    if a.dual:
+        res = {}
+        ok = True
+        for std in ("pal", "ntsc"):
+            k, res[std] = build_system(a, images, at, std)
+            ok &= k
+        if a.convert_only:
+            return 0 if ok else 1
+        k, disk = build_dual(a, res)
+        ok &= k
+        if a.run:
+            subprocess.Popen(["x64sc", "-pal", "-VICIIextpal", "-VICIIpalette", "pepto-pal.vpl",
+                              "-drive8type", "1581", "-8", disk, "-autostart",
+                              os.path.join(BUILD, "diskshow.prg")],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return 0 if ok else 1
+    ok, built = build_system(a, images, at, "ntsc" if a.ntsc else "pal")
+    if a.run and built:
+        subprocess.Popen(["x64sc", "-" + timing.STANDARD, "-VICIIextpal", "-VICIIpalette", "pepto-pal.vpl",
+                          "-autostartprgmode", "1", built["slideshow"]],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return 0 if ok else 1
 

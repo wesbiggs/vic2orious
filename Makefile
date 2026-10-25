@@ -5,7 +5,6 @@
 
 PYTHON  ?= python3
 X64     ?= x64sc
-VICE    := $(X64) -pal -VICIIextpal -VICIIpalette pepto-pal.vpl
 
 # options (make FRAME=1 AT=2,3 run)
 IMAGES  ?=                      # input files to build (default: all of input/*.png)
@@ -15,27 +14,43 @@ LEADING ?=                      # pixel lines between text lines (default 2)
 AUTO    ?=                      # frames per slideshow image (default 250, 0: until space)
 HOLD    ?=                      # seconds per diskshow image (default 15, 0: until space)
 DISK    ?=                      # d64 or d81 (default: d64 if everything fits, else d81)
+NTSC    ?=                      # 1: build for NTSC C64s, into build/ntsc/ (default: PAL);
+                                #    with DUAL=1: run in NTSC VICE
+DUAL    ?=                      # 1: build both, and a disk for both in build/dual/
 FAST    ?=                      # 1: run-diskshow/-viewer/-d64 load instantly (no true drive
                                 #    emulation; VICE handles the KERNAL's disk calls)
 IMAGE   ?=                      # run-viewer: image name to type at the prompt
 ASK     ?= princess             # run-ask: which ask-<name>.prg
 
-# options that change the conversion, and all of them
-COPTS := $(strip $(if $(strip $(FRAME)),-b) $(if $(strip $(AT)),--at $(strip $(AT))) \
-         $(if $(strip $(LEADING)),--leading $(strip $(LEADING))))
-OPTS  := $(strip $(COPTS) $(if $(strip $(AUTO)),--auto $(strip $(AUTO))) \
+# build directories: SYS for the programs with images in them (build/, build/ntsc/), B
+# for the disk with diskshow and viewer (build/dual/ with DUAL=1); VICE's video system
+SYS  := build$(if $(strip $(NTSC)),/ntsc)
+B    := $(if $(strip $(DUAL)),build/dual,$(SYS))
+VICE := $(X64) $(if $(strip $(NTSC)),-ntsc,-pal) -VICIIextpal -VICIIpalette pepto-pal.vpl
+
+# options that change the conversion (per system), and all of them
+CBASE      := $(strip $(if $(strip $(FRAME)),-b) $(if $(strip $(AT)),--at $(strip $(AT))) \
+              $(if $(strip $(LEADING)),--leading $(strip $(LEADING))))
+COPTS_pal  := $(CBASE)
+COPTS_ntsc := $(strip --ntsc $(CBASE))
+DIR_pal    := build
+DIR_ntsc   := build/ntsc
+SYSTEMS    := $(if $(strip $(DUAL)),pal ntsc,$(if $(strip $(NTSC)),ntsc,pal))
+OPTS  := $(strip $(if $(strip $(DUAL)),--dual $(CBASE),$(COPTS_$(SYSTEMS))) \
+         $(if $(strip $(AUTO)),--auto $(strip $(AUTO))) \
          $(if $(strip $(HOLD)),--hold $(strip $(HOLD))) \
          $(if $(strip $(DISK)),--disk $(strip $(DISK))) $(IMAGES))
 
 PNGS    := $(or $(strip $(IMAGES)),$(wildcard input/*.png))
-JSONS   := $(foreach p,$(PNGS),build/$(basename $(notdir $(p))).json)
+jsons    = $(foreach p,$(PNGS),$(DIR_$(1))/$(basename $(notdir $(p))).json)
+JSONS   := $(foreach s,$(SYSTEMS),$(call jsons,$(s)))
 SOURCES := $(wildcard input/* vic2/*.py asm/*)
-STAMP   := build/.built
+STAMP   := $(B)/.built
 
 # the disk the build made (.d64 or .d81) and the drive VICE needs for it (FAST=1: no true
 # drive emulation, VICE traps the KERNAL's serial bus calls instead)
-DISKIMG  = $$(ls build/vic2orious.d81 2>/dev/null || echo build/vic2orious.d64)
-DRIVE    = $$(test -e build/vic2orious.d81 && echo -drive8type 1581) \
+DISKIMG  = $$(ls $(B)/vic2orious.d81 2>/dev/null || echo $(B)/vic2orious.d64)
+DRIVE    = $$(test -e $(B)/vic2orious.d81 && echo -drive8type 1581) \
            $(if $(strip $(FAST)),+drive8truedrive -trapdevice8)
 
 .PHONY: all build convert verify run run-slideshow run-diskshow run-viewer run-ask run-v2i \
@@ -45,51 +60,54 @@ all: build
 
 build: $(STAMP)
 
-# step 1: convert each image on its own (build/<name>.json records the result; make -j
-# converts several at once). The build skips images whose result is still valid, so
-# touching vic2/*.py only reconverts when a converter source really changed.
+# step 1: convert each image on its own, for each system (build/<name>.json and
+# build/ntsc/<name>.json record the results; make -j converts several at once). The
+# build skips images whose result is still valid, so touching vic2/*.py only reconverts
+# when a converter source really changed.
 convert: $(JSONS)
 
-$(foreach p,$(PNGS),$(eval build/$(basename $(notdir $(p))).json: $(p) $(wildcard $(basename $(p)).txt)))
-
-$(JSONS): $(wildcard vic2/*.py) build/.copts
-	$(PYTHON) -m vic2.build --convert-only $(COPTS) $(filter %.png,$^)
+define system_rules
+$(foreach p,$(PNGS),$(eval $(DIR_$(1))/$(basename $(notdir $(p))).json: $(p) $(wildcard $(basename $(p)).txt)))
+$(call jsons,$(1)): $(wildcard vic2/*.py) $(DIR_$(1))/.copts
+	$(PYTHON) -m vic2.build --convert-only $(COPTS_$(1)) $$(filter %.png,$$^)
+endef
+$(foreach s,pal ntsc,$(eval $(call system_rules,$(s))))
 
 # step 2: programs and disk from the converted images (stamped, as make 3.81 has no
 # grouped targets); reruns when sources or options change
-$(STAMP): $(JSONS) $(SOURCES) build/.opts
+$(STAMP): $(JSONS) $(SOURCES) $(B)/.opts
 	$(PYTHON) -m vic2.build $(OPTS)
 	@touch $@
 
-build/.opts build/.copts: FORCE
-	@mkdir -p build
-	@echo '$(if $(filter %.copts,$@),$(COPTS),$(OPTS))' | cmp -s - $@ || \
-		echo '$(if $(filter %.copts,$@),$(COPTS),$(OPTS))' > $@
+stampval = $(if $(filter %.opts,$(1)),$(OPTS),$(if $(filter build/ntsc/%,$(1)),$(COPTS_ntsc),$(COPTS_pal)))
+$(sort $(B)/.opts build/.copts build/ntsc/.copts): FORCE
+	@mkdir -p $(@D)
+	@echo '$(call stampval,$@)' | cmp -s - $@ || echo '$(call stampval,$@)' > $@
 
-verify: build/.opts
+verify: $(B)/.opts
 	$(PYTHON) -m vic2.build --verify $(OPTS)
 	@touch $(STAMP)
 
 run: run-slideshow
 
 run-slideshow: build
-	$(VICE) -autostartprgmode 1 build/slideshow.prg
+	$(VICE) -autostartprgmode 1 $(SYS)/slideshow.prg
 
 run-diskshow: build
-	$(VICE) $(DRIVE) -8 $(DISKIMG) -autostart build/diskshow.prg
+	$(VICE) $(DRIVE) -8 $(DISKIMG) -autostart $(B)/diskshow.prg
 
 run-viewer: build
-	$(VICE) $(DRIVE) -8 $(DISKIMG) -autostart build/viewer.prg \
+	$(VICE) $(DRIVE) -8 $(DISKIMG) -autostart $(B)/viewer.prg \
 		$(if $(strip $(IMAGE)),-keybuf '$(strip $(IMAGE))\n')
 
 run-ask: build
-	$(VICE) -autostartprgmode 1 build/ask-$(strip $(ASK)).prg
+	$(VICE) -autostartprgmode 1 $(SYS)/ask-$(strip $(ASK)).prg
 
 run-v2i: build
-	$(VICE) -autostartprgmode 1 build/v2i-demo.prg
+	$(VICE) -autostartprgmode 1 $(SYS)/v2i-demo.prg
 
 run-v2t: build
-	$(VICE) -autostartprgmode 1 build/v2t-demo.prg
+	$(VICE) -autostartprgmode 1 $(SYS)/v2t-demo.prg
 
 run-d64: build
 	$(VICE) $(DRIVE) -autostart $(DISKIMG)
@@ -109,6 +127,9 @@ help:
 	@echo "make run-v2i        run the v2i-only demo (one image, space returns to BASIC)"
 	@echo "make run-v2t        run the v2t-only demo (text, KERNAL on, any key returns)"
 	@echo "make run-d64        boot the disk (.d64, or .d81 when the images need it)"
-	@echo "make clean          remove build/"
+	@echo "make clean          remove build/ (both PAL and NTSC builds)"
 	@echo "options: IMAGES='input/a.png ...' FRAME=1 AT=COLUMN,ROW LEADING=n AUTO=n HOLD=n DISK=d64|d81"
+	@echo "         NTSC=1 (for NTSC C64s; build/ntsc/ instead of build/, run targets use it too)"
+	@echo "         DUAL=1 (PAL and NTSC, and build/dual/: one disk for both; the run targets"
+	@echo "                 use it, in NTSC VICE with NTSC=1)"
 	@echo "         FAST=1 (run targets using the disk: instant loading)"

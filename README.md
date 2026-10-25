@@ -60,9 +60,26 @@ make verify                           # build and compare every screen with VICE
 make clean
 ```
 
+**NTSC:** images are built for PAL C64s by default. For an NTSC C64 (6567R8 VIC-II, the
+usual one in North America) add `NTSC=1` to every make command (`make NTSC=1`,
+`make run-diskshow NTSC=1`, ...): that build goes to `build/ntsc/`, so PAL and NTSC builds
+can be kept side by side. An image only displays on the system it was built for; on the
+other one the programs say so. NTSC images often convert a little better, as NTSC lines
+are two cycles longer.
+
+**Both on one disk:** `make DUAL=1` builds for both systems and writes
+`build/dual/vic2orious.d81` (or `.d64` if it fits) with every image twice,
+`<name>-p.v2i` and `<name>-n.v2i` (names cut to 10 characters), the stories once, and a
+`diskshow` and `viewer` that detect the machine and load the matching files (in the
+viewer, type the name without the ending). The programs with images built in come in
+both versions: `slideshow-p`/`-n`, `v2i demo-p`/`-n`, `ask <name>-p`/`-n`. The run
+targets use this disk with `DUAL=1`, in NTSC VICE when you add `NTSC=1`. 24 images take
+about 2,600 of the 3,160 blocks on a `.d81`.
+
 Further options: `LEADING=n` (pixel lines between text lines, default 2), `AUTO=n`
 (frames per slideshow image, default 250; 0: only space changes the image) and
-`HOLD=n` (seconds diskshow shows each image, default 15; 0: until space) and
+`HOLD=n` (seconds diskshow shows each image, default 15; 0: until space; diskshow turns
+it into 50 or 60 frames a second for the machine it runs on) and
 `DISK=d64|d81`. `make help` lists everything. The Makefile runs `python3 -m vic2.build`
 (see `python3 -m vic2.build --help`) and rebuilds only when inputs or options change.
 

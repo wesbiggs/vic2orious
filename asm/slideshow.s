@@ -30,6 +30,7 @@ start:  jsr v2i_init
         sta cur
         sta keyprev
         jsr select
+        bcs fail
         jsr v2i_start
 main:   lda req
         beq main
@@ -43,13 +44,15 @@ main:   lda req
 :       stx cur
         jsr v2i_stop
         jsr select
+        bcs fail
         jsr v2i_start
         jmp main
 
-select: ldx cur                         ; show image #cur and its text, if it has any
-        lda img_lo,x
+select: ldx cur                         ; show image #cur and its text, if it has any;
+        lda img_lo,x                    ; C=1, A = error: not shown
         ldy img_hi,x
         jsr v2i_show
+        bcs @r
 .if FRAME
         lda #FRAME_COL
         jsr v2i_frame
@@ -59,7 +62,8 @@ select: ldx cur                         ; show image #cur and its text, if it ha
         beq :+
         lda txt_lo,x
         jsr v2t_draw
-:       rts
+:       clc
+@r:     rts
 
 hook:
 .if AUTO_FRAMES
@@ -87,6 +91,22 @@ hook:
         sta frame
 :       stx keyprev
         rts
+
+fail:   pha                             ; v2i_show failed: say why, back to BASIC
+        jsr v2i_exit
+        pla
+        jsr v2i_errmsg
+        sta $fb
+        sty $fc
+        ldy #0
+:       lda ($fb),y
+        beq :+
+        jsr $ffd2                       ; CHROUT
+        iny
+        bne :-
+:       lda #13
+        jsr $ffd2
+        jmp ($a002)                     ; BASIC warm start
 
         .include "v2i.inc"
         .include "v2t.inc"

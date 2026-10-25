@@ -1,4 +1,4 @@
-# .v2i image format (version 1)
+# .v2i image format (version 2)
 
 A `.v2i` file holds one converted image: a hires bitmap, its cell colours, the sprite data,
 and a *kernel*. The kernel is 6502 code generated for this image that rewrites the sprite
@@ -17,7 +17,7 @@ All words are little endian. Offsets are from the start of the data, after the P
 | offset | size | field |
 |---|---|---|
 | 0 | 3 | magic `"V2I"` |
-| 3 | 1 | format version, 1 |
+| 3 | 1 | format version, 2 |
 | 4 | 1 | width in cells (width / 8) |
 | 5 | 1 | height in cells (height / 8) |
 | 6 | 1 | character column of the image's left edge |
@@ -30,7 +30,11 @@ All words are little endian. Offsets are from the start of the data, after the P
 | 18 | 2 | screen destination: `$c000 + 40 * row` |
 | 20 | 2 | number of image lines that are not pixel perfect (information only) |
 | 22 | 2 | number of image pixels that are not pixel perfect (information only) |
-| 24 | ... | kernel, then the bitmap, screen and sprite streams, back to back |
+| 24 | 1 | video system the kernel is made for: 0 PAL (6569/8565, 63 cycles x 312 lines), 1 NTSC (6567R8/8562, 65 cycles x 263 lines) |
+| 25 | 1 | reserved, 0 |
+| 26 | ... | kernel, then the bitmap, screen and sprite streams, back to back |
+
+Version 1 had no video system byte (always PAL) and a 24-byte header.
 
 ## Streams
 
@@ -48,7 +52,9 @@ All three streams are **zero-run encoded**: `$00, n` stands for n zero bytes (n 
 ## Kernel
 
 The kernel is an unrolled, cycle-exact routine, called with `JSR` once per frame. It
-assumes:
+only works on the video system in byte 24: on the other one every write lands at the
+wrong cycle (`v2i_show` refuses such a file). The sprite and bitmap data are converted
+together with the kernel, so they differ between PAL and NTSC files too. It assumes:
 
 - **Screen layout:** VIC bank 3 (`$c000-$ffff`), with the screen at `$c000`, sprite
   pointers at `$c3f8` and the bitmap at `$e000`. It sets `$d011` = `$3b`, `$d016` = `$08`,
