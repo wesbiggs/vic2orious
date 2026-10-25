@@ -777,6 +777,9 @@ def main():
             assert len(at) == 2
         except (ValueError, AssertionError):
             ap.error("--at takes COLUMN,ROW")
+        if not (0 <= at[0] < 40 and 0 <= at[1] < 25):
+            ap.error("--at takes COLUMN,ROW in character cells (0-39, 0-24), not pixels: "
+                     "x = 8 * COLUMN, y = 8 * ROW")
     fonts.use(a.font)
     if a.font:
         print("font: %s, %d pixels high" % (fonts.current().name, fonts.current().height))

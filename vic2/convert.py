@@ -1,6 +1,6 @@
 """Convert a C64-palette image into hires bitmap + per-line multiplexed hires sprites.
 
-Width and height must be multiples of 8 (width up to 256, height up to 200). Every 8x8
+Width and height must be multiples of 8 (up to 320x200). Every 8x8
 cell gets two bitmap colours; every pixel of any other colour must be painted by one of the
 8 hardware sprites. On each raster line the 8 sprites may be re-coloured and re-positioned
 (by the generated raster kernel), so each line needs a set of at most 8 "spans" (24 pixel
@@ -25,7 +25,8 @@ PIX_C0 = 13           # cycle in which sprite X coordinate x is drawn = PIX_C0 +
 MARGIN = 1            # extra safety cycles around every pixel edge
 FIT_TRIES = 24        # schedules tried per line before dropping spans greedily
 ROW_WEIGHTS = (150, 40)  # cell colour searches per row: cost of a pixel no span covers
-MAX_W, MAX_H = 256, 200
+MAX_W, MAX_H = 320, 200
+D010 = 0xD010         # X high bits of all 8 sprites (one register)
 REG_X = [0xD000 + 2 * s for s in range(8)]
 REG_Y = [0xD001 + 2 * s for s in range(8)]
 REG_C = [0xD027 + s for s in range(8)]
@@ -34,6 +35,17 @@ PTR = [0xC3F8 + s for s in range(8)]
 
 def pc(xreg):
     return PIX_C0 + (xreg >> 3)
+
+
+def match_cycle(xreg):
+    """Cycle (in its own line) in which a sprite at X register xreg (0..511) would start:
+    X counts on from 0 in cycle 13 to the end of the line, then 404 ($194) onwards fills
+    cycles 1-12 (roughly; callers keep a margin). None if it never matches (504+ on PAL)."""
+    if xreg < 404:
+        return pc(xreg)
+    if timing.STANDARD == "pal" and xreg >= 504:
+        return None
+    return 1 + (xreg - 404) // 8
 
 
 def badlines():
@@ -53,9 +65,7 @@ class Geometry:
     by default, char row 1, column 1 with a frame (which the player draws in the ring of
     cells around the image), or any (column, row) passed as at.
 
-    The X high bit ($d010) is never used, so sprites can start at most at X=255: the
-    image must start at screen x <= 231, and pixel columns right of x = 255 + 24 can only
-    be painted by the bitmap (a 256 wide image at column 0 loses its last column).
+    Sprite X is 9 bits (high bits in $d010), so spans may start anywhere in the image.
     """
 
     def __init__(self, w, h, frame=False, at=None):
@@ -68,15 +78,13 @@ class Geometry:
         if self.col0 < 0 or self.row0 < 0 or self.col0 + self.cols > 40 or self.row0 + self.rows > 25:
             raise ValueError("a %dx%d image does not fit on the screen at column %d, row %d"
                              % (w, h, self.col0, self.row0))
-        if 24 + 8 * self.col0 > 255:
-            raise ValueError("images must start at column %d or less" % ((255 - 24) // 8))
         if frame and not self.frame_fits(self.col0, self.row0, self.cols, self.rows):
             raise ValueError("no room for a frame around a %dx%d image at column %d, row %d"
                              % (w, h, self.col0, self.row0))
         self.frame = frame
         self.raster0 = 0x33 + 8 * self.row0     # first raster line of the image (a badline)
         self.xreg0 = 24 + 8 * self.col0         # sprite X register value for image column 0
-        self.xs_max = 255 - self.xreg0          # rightmost span start (image column)
+        self.xs_max = w - 1                     # rightmost span start (image column)
 
     @staticmethod
     def frame_fits(col0, row0, cols, rows):
@@ -288,7 +296,8 @@ class Converter:
         pro = [(REG_Y[s], SPR_START[s] - 1) for s in range(8)]
         pro += [(0xD017, 0), (0xD015, 0xFF)]
         pro += [(PTR[s], ZERO_SLOT) for s in range(8)]
-        pro += [(r, 0) for r in (0xD010, 0xD01B, 0xD01C, 0xD01D)]   # not $d020/$d021 (v2i_start)
+        pro += [(r, 0) for r in (0xD01B, 0xD01C, 0xD01D)]   # not $d020/$d021 (v2i_start)
+        pro += [(D010, "H")]
         pro += [(0xD016, 0x08), (0xD018, 0x08), (0xD011, D011)]
         for s in range(8):
             pro += [(REG_X[s], "X%d" % s), (REG_C[s], "C%d" % s)]
@@ -327,8 +336,8 @@ class Converter:
 
         # sprite state
         cfg = [None] * 8          # (xstart, color)
-        first_cfg = [None] * 8
-        last_use = [None] * 8     # (raster, last pixel xreg)
+        first_cfg = [None] * 8    # (xstart, color, X high bit set by the prologue)
+        last_use = [None] * 9     # (raster, last pixel xreg); [8]: hi of the last $d010 task
         self.sdata = [dict() for _ in range(8)]   # raster -> 24-bit row
         self.line_cfg = [dict() for _ in range(8)]  # raster -> (xstart, color)
         prev_spans = None
@@ -373,10 +382,13 @@ class Converter:
         sch.add([off] + extra, r)
         self.cut = IMG_H
         sch.finish()
+        hi_bits = 0
         for s in range(8):
-            fc = first_cfg[s] or (0, 0)
+            fc = first_cfg[s] or (0, 0, 0)
             k.code[k.patches["X%d" % s]] = (XREG0 + fc[0]) & 0xFF
             k.code[k.patches["C%d" % s]] = fc[1]
+            hi_bits |= fc[2] << s
+        k.code[k.patches["H"]] = hi_bits
         return len(self.bad_lines)
 
     def do_row(self, sch, fixed, cy, pairs, start):
@@ -485,15 +497,32 @@ class Converter:
         return len(need)
 
     def line_tasks(self, sch, assign, cfg, first_cfg, last_use, r, y):
-        """Register write tasks and sprite rows for one line; updates cfg/first_cfg/last_use."""
+        """Register write tasks and sprite rows for one line; updates cfg/first_cfg/last_use.
+
+        A move across X = 256 also needs the sprite's bit in $d010. That register is shared,
+        so the line's high bit changes become $d010 tasks writing the whole new mask: one for
+        each group of sprites whose windows overlap, each later than the one before (also
+        than the previous line's, last_use[8]), so they land in order. Between the X and the
+        $d010 write the sprite sits at a mixed X; both writes get a window in which neither
+        mixed X can start the sprite (see safe_window)."""
         XREG0 = self.g.xreg0
         tasks, rows, owner = [], {}, {}
+        bits_before = self.hi_mask(cfg)
+        changes = []      # (sprite, lo, hi, span) of high bit changes
         for s, (sp, xs) in assign.items():
             c, a, b, pxs = sp
             newcfg = (xs, c)
             first_px = XREG0 + a
+            new_x = XREG0 + xs
             if cfg[s] is None:
-                first_cfg[s] = newcfg
+                hi_bit = new_x >> 8
+                if last_use[8] is not None and hi_bit:
+                    # a $d010 write has already cleared this sprite's bit: set it again
+                    hi_bit = 0
+                    lo, hi = self.safe_window(0, T(r, pc(first_px) - 1 - MARGIN), r, (new_x & 0xFF,))
+                    changes.append((s, lo, hi, sp))
+                first_cfg[s] = newcfg + (hi_bit,)
+                bits_before |= hi_bit << s
             elif cfg[s] != newcfg:
                 lr, lx = last_use[s]
                 lo = T(lr, pc(lx) + 1 + MARGIN)
@@ -501,25 +530,71 @@ class Converter:
                     tk = sch.new_task(REG_C[s], c, lo, T(r, pc(first_px) - 1 - MARGIN), "c%d@%d" % (s, y))
                     tasks.append(tk)
                     owner[tk.id] = sp
-                if cfg[s][0] != xs:
-                    xm = XREG0 + min(cfg[s][0], xs)
-                    tk = sch.new_task(REG_X[s], (XREG0 + xs) & 0xFF, lo, T(r, pc(xm) - 1 - MARGIN),
-                                      "x%d@%d" % (s, y))
-                    tasks.append(tk)
-                    owner[tk.id] = sp
+                old_x = XREG0 + cfg[s][0]
+                if old_x != new_x:
+                    hi = T(r, pc(min(old_x, new_x)) - 1 - MARGIN)
+                    if (old_x ^ new_x) & 0x100:
+                        lo, hi = self.safe_window(lo, hi, r, ((new_x & 0xFF) | (old_x & 0x100),
+                                                              (old_x & 0xFF) | (new_x & 0x100)))
+                        changes.append((s, lo, hi, sp))
+                    if (old_x ^ new_x) & 0xFF:
+                        tk = sch.new_task(REG_X[s], new_x & 0xFF, lo, hi, "x%d@%d" % (s, y))
+                        tasks.append(tk)
+                        owner[tk.id] = sp
             cfg[s] = newcfg
             last_use[s] = (r, XREG0 + b)
             bits = 0
             for x in pxs:
                 bits |= 1 << (23 - (x - xs))
             rows[s] = bits
+        # $d010 tasks: stab the windows in order of deadline
+        changes.sort(key=lambda ch: ch[2])
+        mask = bits_before
+        while changes:
+            stab = changes[0][2]
+            group = [ch for ch in changes if ch[1] <= stab]
+            changes = [ch for ch in changes if ch[1] > stab]
+            for ch in group:
+                mask ^= 1 << ch[0]
+            lo = max(ch[1] for ch in group)
+            if last_use[8] is not None:
+                lo = max(lo, last_use[8] + 1)
+            tk = sch.new_task(D010, mask, lo, stab, "h@%d" % y)
+            tasks.append(tk)
+            owner[tk.id] = max(group, key=lambda ch: ch[1])[3]
+            last_use[8] = stab
         return tasks, rows, owner
+
+    def hi_mask(self, cfg):
+        """$d010 as the sprites' current positions need it (unused sprites: 0)."""
+        return sum(1 << s for s in range(8) if cfg[s] is not None and self.g.xreg0 + cfg[s][0] >= 256)
+
+    def safe_window(self, lo, hi, r, mixed):
+        """Largest part of lo..hi in which no X in mixed starts the sprite on line r - 1 or
+        r (the sprite gets line r's data at the end of line r - 1; earlier lines have none,
+        and on its old line it has already been displayed). Empty (hi < lo) if none."""
+        bad = []
+        for xreg in mixed:
+            m = match_cycle(xreg)
+            if m is None:
+                continue
+            for line in (r - 1, r):
+                t = T(line, m)
+                bad.append((t - MARGIN - 2, t + MARGIN + 2))
+        bad.sort()
+        best, cur = (lo, lo - 1), lo
+        for b0, b1 in bad + [(hi + 1, hi + 1)]:
+            if b0 > cur and min(b0 - 1, hi) - cur > best[1] - best[0]:
+                best = (cur, min(b0 - 1, hi))
+            cur = max(cur, b1 + 1)
+        return best
 
     # ---- span -> sprite assignment (min writes), DP over sprite subsets
     def assign(self, spans, cfg, last_use, r, fut):
         m = len(spans)
         if m == 0:
             return {}
+        XREG0 = self.g.xreg0
         opts = []  # per span, per sprite: (cost, xstart)
         for j, (c, a, b, pxs) in enumerate(spans):
             lo_x, hi_x = b - 23, min(a, self.g.xs_max)
@@ -528,16 +603,21 @@ class Converter:
                 cur = cfg[s]
                 writes = 0
                 if cur is None:
-                    xs = self.pick_x(c, lo_x, hi_x, fut)
-                    cost = 0
+                    # after the first $d010 write an unused sprite's high bit is 0
+                    xs = self.pick_x(c, lo_x, hi_x, fut, 0 if last_use[8] is not None else None)
+                    cost = 100 * ((XREG0 + xs) >> 8) if last_use[8] is not None else 0
                 else:
                     if cur[1] != c:
                         writes += 1
                     if lo_x <= cur[0] <= hi_x:
                         xs = cur[0]
                     else:
-                        writes += 1
-                        xs = self.pick_x(c, lo_x, hi_x, fut)
+                        hb = (XREG0 + cur[0]) >> 8
+                        xs = self.pick_x(c, lo_x, hi_x, fut, hb)
+                        # the low byte, and $d010 when crossing X = 256 (a write that may
+                        # be shared, and a narrower window: weigh it a bit less)
+                        writes += ((XREG0 + xs) & 0xFF != (XREG0 + cur[0]) & 0xFF)
+                        writes += 0.8 * ((XREG0 + xs) >> 8 != hb)
                     cost = writes * 100
                     if writes:
                         lr, lx = last_use[s]
@@ -565,7 +645,14 @@ class Converter:
         best = min(dp.values(), key=lambda v: v[0])
         return {s: (spans[j], opts[j][s][1]) for j, s in enumerate(best[1])}
 
-    def pick_x(self, c, lo_x, hi_x, fut):
+    def pick_x(self, c, lo_x, hi_x, fut, hi_bit=None):
+        """Span start in lo_x..hi_x reaching most of the coming lines' spans of colour c;
+        with sprite X high bit hi_bit if the range allows it."""
+        if hi_bit is not None:
+            edge = 256 - self.g.xreg0       # first start with the high bit set
+            lo2, hi2 = (lo_x, min(hi_x, edge - 1)) if hi_bit == 0 else (max(lo_x, edge), hi_x)
+            if lo2 <= hi2:
+                lo_x, hi_x = lo2, hi2
         best = None
         for xs in range(lo_x, hi_x + 1):
             score = 0

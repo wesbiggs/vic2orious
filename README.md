@@ -5,6 +5,17 @@ cell than the hardware allows: every raster line, the 8 hardware sprites are rec
 and moved to paint the pixels the bitmap cannot. Pictures can come with a short story,
 drawn next to the image in a proportional version of the C64 font, or in a GEOS font.
 
+## Example
+
+![Source image, C64 output and wrong pixels for a 320x200 dragon](docs/dragon_compare.png)
+
+A full screen (320x200) picture: the source in the C64 palette (left), what the C64
+shows (middle, identical to VICE's output) and the pixels that differ (right, in red).
+In this picture 2098 of 64000 pixels (3.3%) are wrong. Most are on lines that need more
+than 8 single colour sprite spans; the rest are spans whose register writes did not fit
+into the line's free cycles. Fewer colours and less fine detail per line get closer to
+pixel perfect.
+
 ## Requirements
 
 - Python 3 with [Pillow](https://pypi.org/project/pillow/)
@@ -15,7 +26,7 @@ drawn next to the image in a proportional version of the C64 font, or in a GEOS 
 ## 1. Prepare an image
 
 Images must use the 16 C64 colours (Pepto palette), with width and height multiples of 8
-(at most 256x200). Smaller and simpler images convert better; dithering hurts.
+(up to the full screen, 320x200). Smaller and simpler images convert better; dithering hurts.
 
 `tools/png2c64.py` maps any picture to the C64 palette. Resize the picture to the size you
 want first, then:

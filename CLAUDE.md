@@ -60,9 +60,18 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   $33 and sprite X = 24 + column); `build --at C,R` places it elsewhere (`Geometry`). The
   position is baked into the kernel: moving by whole chars changes the schedule (pixel
   windows shift by a cycle per char while DMA stalls stay put; sprite blocks are at
-  absolute raster lines, 21 apart). Sizes are multiples of 8, width <= 256, height <= 200.
-  The X high bit ($d010) is never used, so span starts are limited to X <= 255 and the
-  image must start at column <= 28.
+  absolute raster lines, 21 apart). Sizes are multiples of 8, up to 320x200 anywhere on
+  screen.
+- 9-bit X: a sprite moving across X = 256 also needs its bit in `$d010`, which all 8 share.
+  `line_tasks` turns a line's high bit changes into `$d010` tasks writing the whole mask
+  (one per group of overlapping windows, stabbed by deadline, each later than the previous
+  one, `last_use[8]`, so they land in order). Between the X and `$d010` writes the sprite
+  sits at a mixed X: `safe_window` keeps both writes out of the times either mixed X would
+  start it on lines r-1 and r. Unused sprites are at high bit 0 once any `$d010` write
+  happened (the prologue's `$d010` is patched with the earlier ones' bits). `assign`
+  counts a crossing as 0.8 writes; `pick_x` keeps the high bit when the range allows.
+  The 320x200 `input/dragon.png` needs 55 `$d010` writes; most of its ~2100 wrong pixels
+  are lines needing more than 8 spans, not timing.
 - Frame (`build -b`, for all images of a build): images move to char row 1, column 1
   (raster $3b, X = 32 + column; or to `--at`) and the programs are assembled with
   `FRAME=1`, so they call `v2i_frame`, which draws a 4 px frame

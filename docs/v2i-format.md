@@ -75,8 +75,8 @@ together with the kernel, so they differ between PAL and NTSC files too. It assu
 
 It turns all 8 sprites on, rewrites their position, colour and pointer registers line by
 line down to the image's last line, sets `$d015` = 0, and returns with `RTS` at about
-raster line `$33 + 8 * (row + height)`. Their X high bits (`$d010`) stay 0.
+raster line `$33 + 8 * (row + height)`. Sprites crossing X = 256 also get their high bit
+in `$d010`, which the kernel rewrites as a whole.
 
 The image's position is part of the kernel: every write is timed for that column and row.
-To show an image somewhere else, convert it again with `build --at COLUMN,ROW`. The image
-must start at column 28 or less, because sprite X stays below 256.
+To show an image somewhere else, convert it again with `build --at COLUMN,ROW`.
