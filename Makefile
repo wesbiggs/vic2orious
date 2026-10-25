@@ -11,6 +11,8 @@ IMAGES  ?=                      # input files to build (default: all of input/*.
 FRAME   ?=                      # 1: frame the images (build -b)
 AT      ?=                      # COLUMN,ROW: place the images there (build --at)
 LEADING ?=                      # pixel lines between text lines (default 2)
+FONT    ?=                      # FILE.cvt[:SIZE]: GEOS font for the texts (build --font;
+                                #    default: the character ROM's)
 AUTO    ?=                      # frames per slideshow image (default 250, 0: until space)
 HOLD    ?=                      # seconds per diskshow image (default 15, 0: until space)
 DISK    ?=                      # d64 or d81 (default: d64 if everything fits, else d81)
@@ -31,7 +33,9 @@ VICE := $(X64) $(if $(strip $(NTSC)),-ntsc,-pal) -VICIIextpal -VICIIpalette pept
 
 # options that change the conversion (per system), and all of them
 CBASE      := $(strip $(if $(strip $(FRAME)),-b) $(if $(strip $(AT)),--at $(strip $(AT))) \
-              $(if $(strip $(LEADING)),--leading $(strip $(LEADING))))
+              $(if $(strip $(LEADING)),--leading $(strip $(LEADING))) \
+              $(if $(strip $(FONT)),--font $(strip $(FONT))))
+FONTFILE   := $(firstword $(subst :, ,$(strip $(FONT))))
 COPTS_pal  := $(CBASE)
 COPTS_ntsc := $(strip --ntsc $(CBASE))
 DIR_pal    := build/pal
@@ -45,7 +49,7 @@ OPTS  := $(strip $(if $(strip $(DUAL)),--dual $(CBASE),$(COPTS_$(SYSTEMS))) \
 PNGS    := $(or $(strip $(IMAGES)),$(wildcard input/*.png))
 jsons    = $(foreach p,$(PNGS),$(DIR_$(1))/$(basename $(notdir $(p))).json)
 JSONS   := $(foreach s,$(SYSTEMS),$(call jsons,$(s)))
-SOURCES := $(wildcard input/* vic2/*.py asm/*)
+SOURCES := $(wildcard input/* vic2/*.py asm/*) $(FONTFILE)
 STAMP   := $(B)/.built
 
 # the disk the build made (.d64 or .d81) and the drive VICE needs for it (FAST=1: no true
@@ -69,7 +73,7 @@ convert: $(JSONS)
 
 define system_rules
 $(foreach p,$(PNGS),$(eval $(DIR_$(1))/$(basename $(notdir $(p))).json: $(p) $(wildcard $(basename $(p)).txt)))
-$(call jsons,$(1)): $(wildcard vic2/*.py) $(DIR_$(1))/.copts
+$(call jsons,$(1)): $(wildcard vic2/*.py) $(FONTFILE) $(DIR_$(1))/.copts
 	$(PYTHON) -m vic2.build --convert-only $(COPTS_$(1)) $$(filter %.png,$$^)
 endef
 $(foreach s,pal ntsc,$(eval $(call system_rules,$(s))))
@@ -130,6 +134,7 @@ help:
 	@echo "make run-d64        boot the disk (.d64, or .d81 when the images need it)"
 	@echo "make clean          remove build/ (PAL, NTSC and dual builds)"
 	@echo "options: IMAGES='input/a.png ...' FRAME=1 AT=COLUMN,ROW LEADING=n AUTO=n HOLD=n DISK=d64|d81"
+	@echo "         FONT=fonts/NAME.cvt[:SIZE] (GEOS font for the texts; bring your own)"
 	@echo "         NTSC=1 (for NTSC C64s; build/ntsc/ instead of build/pal/, run targets use it too)"
 	@echo "         DUAL=1 (PAL and NTSC, and build/dual/: one disk for both; the run targets"
 	@echo "                 use it, in NTSC VICE with NTSC=1)"

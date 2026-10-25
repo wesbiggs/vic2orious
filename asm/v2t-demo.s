@@ -1,8 +1,8 @@
 ; v2t demo: text on a hires bitmap without v2i. The KERNAL stays on; the bitmap is in VIC
 ; bank 1 ($6000, colours at $4400). Draws a centred title (v2t_measure + v2t_line), a .v2t
-; story (the first one built) at a pixel position that is not cell aligned (cut off at the
-; bottom if it is long), and a right-aligned footer, then waits for a key and returns to
-; BASIC.
+; story (the first one built, else a sample text) at a pixel position that is not cell
+; aligned (cut off at the bottom if it is long), and a right-aligned footer, then waits for
+; a key and returns to BASIC.
 
 V2T_BITMAP = $6000
 V2T_SCREEN = $4400
@@ -11,7 +11,8 @@ V2T_SCREEN = $4400
 
 GETIN   = $ffe4
 TXT_X   = 16                            ; where the story goes (pixels)
-TXT_Y   = 30
+TXT_Y   = 22 + V2T_FONT_H                ; below the title
+FOOT_Y  = 192 - V2T_FONT_H
 
         .segment "LOADADDR"
         .word $0801
@@ -67,7 +68,7 @@ start:  lda #0
         ldy #>demo_txt
         jsr v2t_draw_at
 
-        lda #184                        ; footer, bottom right, dark grey
+        lda #FOOT_Y                     ; footer, bottom right, dark grey
         sta v2t_y
         lda #$b0
         sta v2t_color
@@ -102,8 +103,8 @@ start:  lda #0
         sta $d020
         rts
 
-centre: jsr v2t_measure                 ; v2t_x = (320 - width of the text at A/Y) / 2
-        sta v2t_x
+centre: jsr v2t_measure                 ; v2t_x = (320 - width of the text at A/Y) / 2,
+        sta v2t_x                       ; 0 if wider than the screen
         stx v2t_x+1
         sec
         lda #<320
@@ -111,7 +112,10 @@ centre: jsr v2t_measure                 ; v2t_x = (320 - width of the text at A/
         sta v2t_x
         lda #>320
         sbc v2t_x+1
-        lsr
+        bcs :+
+        lda #0
+        sta v2t_x
+:       lsr
         sta v2t_x+1
         ror v2t_x
         lda #40                         ; and the line spans the whole width

@@ -10,8 +10,9 @@ SETLFS  = $ffba
 SETNAM  = $ffbd
 LOAD    = $ffd5
 GETIN   = $ffe4
-LOADBUF = $2000                         ; images are loaded here (up to $bfff)
-TXTBUF  = $1800                         ; text files are loaded here (after the program)
+LOADBUF = $2800                         ; images are loaded here (up to $97ff)
+TXTBUF  = $9800                         ; text files are loaded here (up to $9fff, below the
+                                        ; BASIC ROM, which is on when it is checked)
 
 .ifndef FRAME
 FRAME = 0                               ; 1: frame the images (build -b)
@@ -203,7 +204,7 @@ print:  sta vptr                        ; print zero-terminated string at A/Y
 @done:  rts
 
 magic:  .byte "V2I", 2
-tmagic: .byte "V2T", 3
+tmagic: .byte "V2T", 4
 txtext: .byte ".TXT"
 msg_prompt:
         .byte 13, "V2I VIEWER - FILE NAME (EMPTY = QUIT)", 13, "? ", 0
@@ -221,4 +222,4 @@ namebuf: .res 16
 
         .include "v2i.inc"
         .include "v2t.inc"
-        .assert * <= TXTBUF, error, "viewer overlaps the text buffer"
+        .assert * <= LOADBUF, error, "viewer overlaps the image buffer"

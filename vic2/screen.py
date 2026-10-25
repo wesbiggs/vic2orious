@@ -21,16 +21,14 @@ class Screen:
                     self.bits[y][x] = 0
             self.colour(r, col, cols, c)
 
-    def _area(self, x, cols):
+    def _area(self, font, x, cols):
         tcol = x >> 3
         twid = 0 if tcol >= 40 else min(cols, 40 - tcol)
-        return tcol, twid, (tcol + twid) * 8 + 1
+        return tcol, twid, (tcol + twid) * 8 + font.hang
 
-    def _rows(self, y, tcol, twid, c):
-        trow, tyo = y >> 3, y & 7
-        self.colour(trow, tcol, twid, c)
-        if tyo and trow + 1 < 25:
-            self.colour(trow + 1, tcol, twid, c)
+    def _rows(self, font, y, tcol, twid, c):
+        for row in range(y >> 3, min(25, ((y + font.height - 1) >> 3) + 1)):
+            self.colour(row, tcol, twid, c)
 
     def glyphs(self, font, x, y, xlim, codes):
         """OR glyphs into the bitmap from pixel x, y; stops at the first glyph that does not
@@ -38,34 +36,33 @@ class Screen:
         if y >> 3 >= 25:
             return bool(codes)
         for code in codes:
-            code &= 0x7F
-            adv = font.advance[code]
-            if x + adv > xlim:
+            o, w = font.glyph(code)
+            if x + w > xlim:
                 return True
-            for r, b in enumerate(font.glyphs[code]):
-                for j in range(8):
-                    if b & (0x80 >> j) and y + r < 200:
+            for r in range(min(font.height, 200 - y)):
+                for j in range(w):
+                    if font.bit(r, o + j):
                         self.bits[y + r][x + j] = 1
-            x += adv
+            x += w
         return False
 
     def text_line(self, font, x, y, cols, c, codes):
         """v2t_line; returns (clipped, next y)"""
-        tcol, twid, xlim = self._area(x, cols)
+        tcol, twid, xlim = self._area(font, x, cols)
         if y >> 3 < 25:
-            for yy in range(y, min(200, y + 8)):
+            for yy in range(y, min(200, y + font.height)):
                 for xx in range(tcol * 8, (tcol + twid) * 8):
                     self.bits[yy][xx] = 0
-            self._rows(y, tcol, twid, c)
-        return self.glyphs(font, x, y, xlim, codes), y + 8
+            self._rows(font, y, tcol, twid, c)
+        return self.glyphs(font, x, y, xlim, codes), y + font.height
 
     def v2t(self, font, data, x=None, y=None, lead=None):
         """v2t_draw (x, y, lead from the header) or v2t_draw_at, data = .v2t file contents"""
-        assert data[:4] == b"V2T\x03"
+        assert data[:4] == b"V2T\x04" and data[8] == font.height
         x = data[4] * 8 if x is None else x
         y = data[5] * 8 if y is None else y
         lead = data[9] if lead is None else lead
-        tcol, twid, xlim = self._area(x, data[6])
+        tcol, twid, xlim = self._area(font, x, data[6])
         p = 10
         for _ in range(data[7]):
             c, n = data[p], data[p + 1]
@@ -73,9 +70,9 @@ class Screen:
             p += 2 + n
             if n:
                 if y >> 3 < 25:
-                    self._rows(y, tcol, twid, c)
+                    self._rows(font, y, tcol, twid, c)
                 self.glyphs(font, x, y, xlim, codes)
-            y += 8 + lead
+            y += font.height + lead
 
     def paste(self, img, x0, y0):
         for y, row in enumerate(img):

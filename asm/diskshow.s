@@ -17,10 +17,10 @@ GETIN   = $ffe4
 STOP    = $ffe1
 FNLEN   = $b7                           ; SETNAM's length and pointer
 FNADR   = $bb
-LOADBUF = $2000                         ; images are loaded here (up to $97ff)
+LOADBUF = $2800                         ; images are loaded here (up to $97ff)
 TXTBUF  = $9800                         ; text files are loaded here (up to $9fff; below
                                         ; the BASIC ROM, which is on when it is checked).
-                                        ; The program, with its names, ends below $2000
+                                        ; The program, with its names, ends below $2800
 
 .ifndef FRAME
 FRAME = 0                               ; 1: frame the images (build -b)
@@ -288,7 +288,7 @@ namebuf: .res 16
 hold:   .word 0                         ; frames per image (0: until space)
 fps:    .byte 0
 magic:  .byte "V2I", 2
-tmagic: .byte "V2T", 3
+tmagic: .byte "V2T", 4
 msg_loading:
         .byte "LOADING ", 0
 msg_ioerr:

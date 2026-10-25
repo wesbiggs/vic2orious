@@ -1,5 +1,6 @@
 build/
 __pycache__/
 images/
+fonts/
 .DS_Store
 tools/*.png

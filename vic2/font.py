@@ -1,19 +1,25 @@
-"""Proportional font derived from the C64 character ROM (lower/upper case set).
+"""Proportional fonts in the GEOS point-size record layout (docs/v2t-format.md).
 
-Each glyph is trimmed to its non-blank columns, stored left-aligned, and given an advance
-of its width plus one spacing column. The player draws the glyphs at any pixel position.
+The default font is derived from the C64 character ROM (lower/upper case set): each glyph is
+trimmed to its non-blank columns and given one spacing column. Other fonts come from GEOS
+font files in Convert (.cvt) format, one point size of them, used as stored. `use` selects
+the font for the whole process (like timing.set_standard); `current` returns it.
 """
 
 import os
 
 CHARGEN = "/opt/homebrew/share/vice/C64/chargen-901225-01.bin"
-GLYPHS = 128          # screen codes 0..127 (no reverse video)
+FIRST, COUNT = 32, 96   # glyphs for character codes 32..127, as in GEOS
 SPACE_ADVANCE = 4
 SPACING = 1
+MAX_WIDTH = 240         # v2t.inc indexes a glyph row's destination bytes with Y
+HDR = 8                 # record header: baseline, bytes per row, height, index, data offsets
+TRANSLATE = {"‘": "'", "’": "'", "“": '"', "”": '"', "–": "-",
+             "—": "-", " ": " "}
 
 
 def screen_code(ch):
-    """ASCII -> screen code in the lower/upper case character set."""
+    """ASCII -> screen code in the lower/upper case character set (for the ROM font)."""
     o = ord(ch)
     if 97 <= o <= 122:
         return o - 96
@@ -22,35 +28,69 @@ def screen_code(ch):
     return {"@": 0, "[": 27, "]": 29}.get(ch, 32)
 
 
+def code(ch):
+    """Character -> the code stored in .v2t lines and v2t_line strings (32..127)."""
+    ch = TRANSLATE.get(ch, ch)
+    o = ord(ch)
+    return o if FIRST <= o < FIRST + COUNT else 32
+
+
+def codes(text):
+    return [code(c) for c in text]
+
+
 class Font:
-    def __init__(self, path=CHARGEN):
-        if not os.path.exists(path):
-            raise SystemExit("character ROM not found: %s" % path)
-        with open(path, "rb") as f:
-            rom = f.read()[0x800:0x800 + 8 * GLYPHS]
-        self.glyphs = []
-        self.advance = []
-        for c in range(GLYPHS):
-            rows = rom[c * 8:c * 8 + 8]
-            cols = [x for x in range(8) if any(r & (0x80 >> x) for r in rows)]
-            if not cols:
-                self.glyphs.append(bytes(8))
-                self.advance.append(SPACE_ADVANCE)
-                continue
-            left, right = min(cols), max(cols)
-            self.glyphs.append(bytes((r << left) & 0xFF for r in rows))
-            self.advance.append(right - left + 1 + SPACING)
+    """One point size: height, baseline, glyph bit offsets and widths, the bitstream rows,
+    and the record bytes (GEOS layout) that font.inc holds."""
+
+    def __init__(self, record, name):
+        self.name = name
+        self.baseline = record[0]
+        self.bpr = record[1] | record[2] << 8
+        self.height = record[3]
+        idx = record[4] | record[5] << 8
+        data = record[6] | record[7] << 8
+        if not 0 < self.height <= 200 or idx + 2 * (COUNT + 1) > data:
+            raise SystemExit("%s: not a font record" % name)
+        need = data + self.height * self.bpr
+        if len(record) < need:              # some files end a few bytes early
+            record = bytes(record) + bytes(need - len(record))
+        self.record = bytes(record[:need])
+        self.offsets = [record[idx + 2 * i] | record[idx + 2 * i + 1] << 8 for i in range(COUNT + 1)]
+        self.widths = [self.offsets[i + 1] - self.offsets[i] for i in range(COUNT)]
+        if min(self.widths) < 0 or max(self.widths) > MAX_WIDTH or self.offsets[-1] > 8 * self.bpr:
+            raise SystemExit("%s: glyph widths out of range (0..%d)" % (name, MAX_WIDTH))
+        self.idx, self.data = idx, data
+        self.rows = [self.record[data + r * self.bpr:data + (r + 1) * self.bpr]
+                     for r in range(self.height)]
+        # the last glyph of a line may hang this many (blank) columns past the area's edge
+        tails = []
+        for i, w in enumerate(self.widths):
+            cols = [x for x in range(w) if any(self.bit(r, self.offsets[i] + x)
+                                               for r in range(self.height))]
+            if cols:
+                tails.append(w - 1 - max(cols))
+        self.hang = min(tails) if tails else 0
+
+    def bit(self, row, x):
+        return self.rows[row][x >> 3] & (0x80 >> (x & 7))
+
+    def glyph(self, c):
+        """(bit offset, width) of the glyph for code c (codes 128-255 as c & 127, below 32
+        as space)."""
+        i = (c & 0x7F) - FIRST
+        i = i if i >= 0 else 0
+        return self.offsets[i], self.widths[i]
 
     def width(self, text):
-        return sum(self.advance[screen_code(ch)] for ch in text)
+        return sum(self.glyph(c)[1] for c in codes(text))
 
     def wrap(self, para, px):
         """Greedy word wrap of one paragraph to px pixels."""
         lines, cur = [], ""
         for word in para.split():
             cand = word if not cur else cur + " " + word
-            # the last glyph's spacing column may hang over the edge
-            if self.width(cand) - SPACING <= px or not cur:
+            if self.width(cand) - self.hang <= px or not cur:
                 cur = cand
             else:
                 lines.append(cur)
@@ -60,12 +100,112 @@ class Font:
         return lines
 
     def asm(self):
-        """ca65 source with the advance table and glyph data."""
-        out = ["; generated by vic2/font.py: proportional font from the character ROM",
-               "v2t_font_w:"]
-        for i in range(0, GLYPHS, 16):
-            out.append("        .byte " + ",".join("%d" % a for a in self.advance[i:i + 16]))
-        out.append("v2t_font_g:")
-        for g in self.glyphs:
-            out.append("        .byte " + ",".join("$%02x" % b for b in g))
+        """ca65 source: the record and the constants v2t.inc uses."""
+        out = ["; generated by vic2/font.py: %s, %d pixels high (GEOS font record)" % (self.name, self.height),
+               "V2T_FONT_H = %d" % self.height, "V2T_FONT_HANG = %d" % self.hang,
+               "V2T_FONT_BPR = %d" % self.bpr, "v2t_font_idx = v2t_font + %d" % self.idx,
+               "v2t_font_data = v2t_font + %d" % self.data, "v2t_font:"]
+        for i in range(0, len(self.record), 16):
+            out.append("        .byte " + ",".join("$%02x" % b for b in self.record[i:i + 16]))
         return "\n".join(out) + "\n"
+
+
+def rom_font(path=CHARGEN):
+    """The ROM lower/upper case set as an 8 pixel font, ASCII codes 32..127."""
+    if not os.path.exists(path):
+        raise SystemExit("character ROM not found: %s" % path)
+    with open(path, "rb") as f:
+        rom = f.read()[0x800:0x1000]
+    rows, offsets, x = [0] * 8, [], 0
+    for c in range(FIRST, FIRST + COUNT):
+        g = rom[screen_code(chr(c)) * 8:][:8]
+        cols = [i for i in range(8) if any(r & (0x80 >> i) for r in g)]
+        if cols:
+            left, w = min(cols), max(cols) - min(cols) + 1 + SPACING
+        else:
+            left, w = 0, SPACE_ADVANCE
+        offsets.append(x)
+        for r in range(8):                  # w columns, ink left aligned
+            rows[r] = rows[r] << w | ((g[r] << left) & 0xFF) << 8 >> (16 - w)
+        x += w
+    offsets.append(x)
+    bpr = (x + 7) // 8
+    idx = HDR
+    data = idx + 2 * len(offsets)
+    rec = bytearray((6, bpr & 0xFF, bpr >> 8, 8, idx, 0, data & 0xFF, data >> 8))
+    for o in offsets:
+        rec += o.to_bytes(2, "little")
+    for r in rows:
+        rec += (r << (8 * bpr - x)).to_bytes(bpr, "big")
+    return Font(rec, "C64 character ROM")
+
+
+def cvt_records(path):
+    """A GEOS font file in Convert format -> ({point size: record bytes}, font name)."""
+    with open(path, "rb") as f:
+        d = f.read()
+    if d[30:53] != b"PRG formatted GEOS file" or d[21] != 1 or d[22] != 8:
+        raise SystemExit("%s: not a GEOS VLIR font in Convert format" % path)
+    name = d[3:19].rstrip(b"\xa0").decode("latin-1")
+    header = d[254:508]                     # info block bytes 2..255
+    table = d[508:762]                      # record table: (blocks, last byte) per record
+    sizes = []
+    for i in range(15):                     # point size IDs: font ID << 6 | size
+        v = header[0x82 - 2 + 2 * i] | header[0x83 - 2 + 2 * i] << 8
+        if v:
+            sizes.append(v & 0x3F)
+    recs, p = {}, 762
+    for r in range(127):
+        blocks, last = table[2 * r], table[2 * r + 1]
+        if blocks == 0:
+            continue
+        n = (blocks - 1) * 254 + last - 1   # records are stored in whole blocks
+        recs[r] = d[p:p + n]
+        p += blocks * 254
+    recs = {s: recs[s] for s in sizes if s in recs}
+    if not recs:
+        raise SystemExit("%s: no point sizes in the font" % path)
+    return recs, name
+
+
+def split_spec(spec):
+    """"FILE.cvt:SIZE" -> (FILE.cvt, SIZE); "FILE.cvt" -> (FILE.cvt, None)"""
+    head, _, tail = spec.rpartition(":")
+    return (head, int(tail)) if head and tail.isdigit() else (spec, None)
+
+
+def font_path(spec):
+    return split_spec(spec)[0]
+
+
+def load(spec):
+    """None: the ROM font. "FILE.cvt" (its smallest point size) or "FILE.cvt:SIZE"."""
+    if not spec:
+        return rom_font()
+    path, size = split_spec(spec)
+    recs, name = cvt_records(path)
+    if size is None:
+        size = min(recs)
+    if size not in recs:
+        raise SystemExit("%s: no %d point size (it has %s)" % (path, size,
+                                                              ", ".join(map(str, sorted(recs)))))
+    return Font(recs[size], "%s %d" % (name, size))
+
+
+_spec, _font = None, None
+
+
+def use(spec):
+    """Select the font for everything from here on (see load)."""
+    global _spec, _font
+    _spec, _font = spec, load(spec)
+
+
+def current():
+    if _font is None:
+        use(None)
+    return _font
+
+
+def spec():
+    return _spec

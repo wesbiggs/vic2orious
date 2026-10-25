@@ -28,7 +28,9 @@ start:  jsr v2i_init
         lda #<ask_img
         ldy #>ask_img
         jsr v2i_show
-        bcs fail
+        bcc :+
+        jmp fail
+:
 .if FRAME
         lda #$10
         jsr v2i_frame
@@ -123,7 +125,7 @@ answer: tax                             ; clear the answer area, draw answer A l
         sta v2t_y
         lda #ASK_LEAD
         sta v2t_lead
-@line:  ldy #0                          ; colour, screen codes, 0; $ff ends the answer
+@line:  ldy #0                          ; colour, text, 0; $ff ends the answer
         lda (lp),y
         cmp #$ff
         beq @done
@@ -156,7 +158,7 @@ answer: tax                             ; clear the answer area, draw answer A l
 
 menu:   lda #ASK_MENU_Y                 ; one line per topic, the one in sel highlighted
         sta v2t_y
-        lda #0
+        lda #ASK_MENU_LEAD              ; each starts a character row
         sta v2t_lead
         ldx #0
 @m:     stx mi

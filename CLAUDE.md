@@ -28,8 +28,10 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   are documented in its docstring.
 - `vic2/screen.py`: Python model of the screen as the library's text/clear routines leave
   it (used by `--verify`). `vic2/ask.py`: `.ask` parsing, layout and model for the demo.
-- `vic2/font.py`: proportional font derived from the ROM lower/upper case set, plus the
-  pixel-width word wrap.
+- `vic2/font.py`: proportional fonts as GEOS point-size records: the default derived from
+  the ROM lower/upper case set, or one size of a GEOS `.cvt` font (`build --font`); the
+  ASCII text codes and the pixel-width word wrap. `font.use()` selects the font for the
+  whole process (like `timing.set_standard`), `font.current()` returns it.
 - `vic2/palette.py`: Pepto palette, nearest-colour loading.
 - `asm/v2i.inc`: image library (`v2i_*`: machine takeover and exit, raster IRQ,
   unpacking into VIC bank 3, frame). `asm/v2t.inc`: text library (`v2t_*`: .v2t files,
@@ -45,6 +47,9 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   floydsteinberg|none` (default floydsteinberg). Refuses to overwrite its input. Its old
   `-b` frame option was removed: framed pixels did not always convert exactly; frames come
   from `v2i_frame` (`build -b`).
+- `fonts/`: GEOS fonts in Convert format for `--font` (gitignored: third party fonts are
+  not committed; the README tells users to bring their own). Tested with a 26 px Old
+  English (one size) and NLQ (10-24, several sizes per file).
 - `input/`: images (`name.png`), optional stories (`name.txt`) and optional demo questions
   (`name.ask`, builds `build/pal/ask-name.prg`). `images/` holds older test images (local
   only, gitignored). `build/` is generated and gitignored.
@@ -103,21 +108,29 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   image names (base cut to 10 by `dual_base`); texts are shared (layout depends on the
   position only). `--verify` with `--dual` also boots the dual diskshow on both systems.
   diskshow's hold time is `HOLD_SECS`, multiplied by 50 or 60 at startup.
-- Buffers: images load at `$2000` (build asserts a `.v2i` ends below `$9800`); diskshow
-  loads texts at `$9800` (its name tables grow with the image count, so it may use up to
-  `$1fff`), the viewer at `$1800`. Not `$a000-$bfff`: the players check the header with
-  the BASIC ROM still on, which hides that RAM (a text buffer at `$b800` silently lost
-  every story).
+- Buffers: diskshow and the viewer load images at `$2800` (`PLAYER_BUF`; build asserts a
+  `.v2i` fits below `$9800`) and texts at `$9800`. The programs may use up to `$27ff`:
+  diskshow's name tables grow with the image count, and a big font is several K (the
+  viewer with the 26 px Old English font ends at `$2179`; images were at `$2000` and the
+  viewer's texts at `$1800` before GEOS fonts). Not `$a000-$bfff`: the players
+  check the header with the BASIC ROM still on, which hides that RAM (a text buffer at
+  `$b800` silently lost every story).
 - Lines that cannot be done exactly are not skipped: with more than 8 spans needed the
   cover keeps the most pixels; when the writes do not fit, `fit_line` searches best-first
   (up to `FIT_TRIES` schedules) for the set of dropped spans losing the fewest pixels.
   `recover` then lets sprites paint leftover pixels they already reach without writes.
   Remaining pixels fall back to the nearer of the cell's two colours.
-- Text: the build word-wraps by pixel width and ships finished lines; the C64 only draws
-  glyphs (shift + OR into the bitmap) and colours each row's cells. The C64 does not wrap.
-  Lines are 8 + leading pixels apart (`build --leading`, default 2, stored in the `.txt`
-  header), so a line can straddle two char rows: glyph rows past the cell go through `pp2`
-  (= `pp` + 312), and both rows get the line's colour (the later line wins a shared row).
+- Text: the build word-wraps by pixel width and ships finished lines (ASCII codes); the
+  C64 only draws glyphs and colours each row's cells. The C64 does not wrap. The font is a
+  GEOS record assembled into the program (`font.inc`): `v2t_tglyphs` takes 8 bitstream
+  bits at a time from the glyph's bit offset, masks the last ones and shift + ORs them
+  into the bitmap, row by row (+1, or +313 at a cell's bottom). Lines are H + leading
+  pixels apart (H = font height, stored in `.txt` byte 8 and checked by `v2t_draw`;
+  `build --leading`, default 2), so a line touches every char row its H lines reach, and
+  all of them get the line's colour (the later line wins a shared row). The text layout
+  depends on the font; it is packed on every build, outside the conversion cache. The ask
+  demo puts each menu line on a char row boundary (`ASK_MENU_LEAD`) and skips itself
+  (`NoRoom`) when a big font leaves no room for answers.
 
 ## Working in the repo
 
@@ -125,14 +138,16 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   compare each screen with VICE, `--run` to launch the slideshow; specific files can be
   passed as arguments). The Makefile wraps it: `make verify`,
   `make run[-diskshow|-viewer|-ask|-d64]`, options `IMAGES FRAME AT LEADING AUTO HOLD
-  DISK NTSC DUAL FAST IMAGE ASK` (`make help`). macOS make is 3.81, so the Makefile uses a
+  DISK NTSC DUAL FAST IMAGE ASK FONT` (`make help`). macOS make is 3.81, so the Makefile uses a
   stamp file (`build/<system>/.built`, plus `.opts`/`.copts` there for the options) instead
   of grouped targets.
 - Conversion cache: `build/pal/<name>.json` (`build/ntsc/` for NTSC) holds the converter result (stats, geometry, path
-  of `_expected.png`) and a key hashing the png, its `.txt`, frame/at/leading,
-  `CACHE_VERSION` and `CACHE_SOURCES` (convert, timing, palette, font). Builds reuse it;
+  of `_expected.png`) and a key hashing the png, frame/at, the video system,
+  `CACHE_VERSION` and `CACHE_SOURCES` (convert, timing, palette). Builds reuse it;
   `--force` reconverts. build.py itself is not hashed: bump `CACHE_VERSION` when changing
-  how `.v2i`/`.txt` are packed. The Makefile converts each image in its own
+  how `.v2i` is packed. Texts are not cached: `convert_image` packs the `.txt` again on
+  every run (milliseconds), so editing a story, `--font` or `--leading` never reconverts
+  the image. The Makefile converts each image in its own
   `--convert-only` run (target `build/<system>/<name>.json`, so `make -j` parallelises), then runs
   the full build, which finds everything cached.
 - After touching `timing.py`, `convert.py`, `v2i.inc` or `v2t.inc`, run `--verify`: every check
@@ -165,8 +180,8 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   0 holds an image until space, used by its `--verify` check, which boots it with a one-image D64). The disk is a D64 if
   everything fits (664 blocks, 144 entries; about 13 images), else a D81 (3160 blocks;
   VICE needs `-drive8type 1581`, which the Makefile adds). VIC bank 3 (`$c000-$ffff`) holds the image on screen and is not available.
-  The viewer must end below `$1800` (asserted): text files load there, images at `$2000`.
-  (It used to load text at `$1000` and overwrote the end of its own font.)
+  The viewer and diskshow must end below `$2800` (asserted): images load there.
+  (The viewer once loaded text at `$1000` and overwrote the end of its own font.)
 - Disk names: images keep their name (cut to 16 chars, `-c64` dropped); text files are the
   first 12 chars + `.txt`.
 
@@ -187,7 +202,9 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   line but leaves worse sprite state; worse overall), larger `FIT_TRIES` (100 no better than
   24), random restarts in the cell search (too slow for little gain).
 - Text: fixed 8x8 ROM glyphs first, then the proportional ROM font (about 20% more text per
-  line; letters average 6.8 px because of the 2 px strokes).
+  line; letters average 6.8 px because of the 2 px strokes), first as 8 bytes per glyph
+  indexed by screen code, now as a GEOS record (same pixels: `--verify` and the models
+  matched before and after the switch).
 - NTSC sprite DMA from Bauer's vic-ii.txt alone: its 6567R8 diagram is abbreviated and
   reads as sprites 0-2 at 60/62/64 with 3-7 unchanged; that gave ~2300 wrong pixels in
   VICE, and guessed shifts did not converge. VICE's cycle tables (above) gave 0.
@@ -199,4 +216,6 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 - Fastloader / IRQ-safe loader for the viewer and diskshow (the KERNAL load is slow and
   cannot run while a kernel is displaying; with one, diskshow could load the next image
   while showing the current one).
-- C64-side word wrap for plain text files; custom fonts from a PNG.
+- C64-side word wrap for plain text files; custom fonts from a PNG; fonts loaded at run
+  time (the `.txt` could name one; the drawer would read the record through a pointer
+  instead of the assembled labels); mega fonts.

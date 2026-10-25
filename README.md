@@ -3,7 +3,7 @@
 Turns small pictures into Commodore 64 hires graphics that use far more colours per 8x8
 cell than the hardware allows: every raster line, the 8 hardware sprites are recoloured
 and moved to paint the pixels the bitmap cannot. Pictures can come with a short story,
-drawn next to the image in a proportional version of the C64 font.
+drawn next to the image in a proportional version of the C64 font, or in a GEOS font.
 
 ## Requirements
 
@@ -38,6 +38,15 @@ python3 tools/png2c64.py "pics/*.png" -o input/           # many, keeping their 
 Put the text in `input/<name>.txt`: paragraphs separated by blank lines, a first line
 starting with `# ` becomes the title. It is wrapped to the space right of the image (or
 below a very wide image); the build tells you if it does not fit.
+
+### Fonts
+
+By default the text uses a proportional font made from the C64's own character set. Any
+GEOS font in Convert format (`.cvt`) works too: `make FONT=fonts/NLQ.cvt:12` uses its 12
+point size (without `:12`, its smallest). This repository ships no fonts, as GEOS fonts
+belong to their authors: get your own (GEOS disk archives and font collections have
+plenty) and put them in `fonts/`, which git ignores. Big sizes take memory and screen
+space: a 24 point font fits about 12 letters in the space beside a 128 pixel wide image.
 
 ## 3. Questions for the ask demo (optional)
 
@@ -76,7 +85,8 @@ both versions: `slideshow-p`/`-n`, `v2i demo-p`/`-n`, `ask <name>-p`/`-n`. The r
 targets use this disk with `DUAL=1`, in NTSC VICE when you add `NTSC=1`. 24 images take
 about 2,600 of the 3,160 blocks on a `.d81`.
 
-Further options: `LEADING=n` (pixel lines between text lines, default 2), `AUTO=n`
+Further options: `FONT=FILE.cvt[:SIZE]` (see Fonts above), `LEADING=n` (pixel lines
+between text lines, default 2), `AUTO=n`
 (frames per slideshow image, default 250; 0: only space changes the image) and
 `HOLD=n` (seconds diskshow shows each image, default 15; 0: until space; diskshow turns
 it into 50 or 60 frames a second for the machine it runs on) and
@@ -85,9 +95,10 @@ it into 50 or 60 frames a second for the machine it runs on) and
 
 Each image is converted once. `build/pal/<name>.json` (`build/ntsc/` for NTSC) records
 what the conversion depended on
-(the image, its story, the options, the converter sources), and later builds reuse the
-`.v2i` while all that stays the same, so adding an image or editing a story only converts
-that one. `python3 -m vic2.build --force` converts everything again.
+(the image, the placement options, the converter sources), and later builds reuse the
+`.v2i` while all that stays the same, so adding an image only converts that one. Stories
+are laid out again on every build, so editing one, or changing `FONT` or `LEADING`,
+converts nothing. `python3 -m vic2.build --force` converts everything again.
 
 For every image the build prints how many lines and pixels could not be reproduced
 exactly, and writes `build/pal/<name>_compare.png` (source | C64 result | wrong pixels in
@@ -138,5 +149,5 @@ The C64 side is two independent ca65 libraries:
 
 Copyright 2026 Wes Biggs. Licensed under the [Apache License, Version 2.0](LICENSE).
 
-The font is generated at build time from the C64 character ROM that comes with VICE; it is
-not part of this repository.
+The default font is generated at build time from the C64 character ROM that comes with
+VICE; it is not part of this repository, and neither are GEOS fonts (see Fonts above).

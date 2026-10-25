@@ -1,8 +1,9 @@
 """Convert images to .v2i files, assemble the slideshow, viewer and demos, build a D64
 and optionally verify in VICE.
 
-usage: python3 -m vic2.build [-b] [--at COLUMN,ROW] [--ntsc | --dual] [--disk d64|d81]
-                             [--convert-only] [--force] [--verify] [--run] [images...]
+usage: python3 -m vic2.build [-b] [--at COLUMN,ROW] [--font FILE.cvt[:SIZE]] [--ntsc | --dual]
+                             [--disk d64|d81] [--convert-only] [--force] [--verify] [--run]
+                             [images...]
 
 Kernels are cycle exact for one video system: PAL by default, NTSC (6567R8) with --ntsc.
 A PAL build goes to build/pal/, an NTSC build to build/ntsc/, so both can be kept;
@@ -28,8 +29,8 @@ import sys
 from PIL import Image
 
 from . import convert, timing
-from .ask import Ask
-from .font import Font
+from . import font as fonts
+from .ask import Ask, NoRoom
 from .palette import load_indexed, save_indexed, PEPTO, nearest, load_vpl
 from .screen import Screen
 
@@ -38,8 +39,9 @@ BUILD = os.path.join(ROOT, "build", "pal")  # build/ntsc with --ntsc (see use_sy
 ASM = os.path.join(ROOT, "asm")
 V2I_VERSION = 2
 V2I_LOAD = 0x2000
+PLAYER_BUF = 0x2800           # diskshow and viewer load images here, texts at $9800
 V2T_LOAD = 0x1800
-V2T_VERSION = 3
+V2T_VERSION = 4
 TEXT_LEADING = 2              # default pixel lines between text lines (--leading)
 TEXT_TITLE = (1 << 4) | 0     # "# " lines: white on black
 TEXT_BODY = (15 << 4) | 0     # light grey on black
@@ -64,16 +66,15 @@ def rle_zero(data):
     return out + b"\0\0"
 
 
-CACHE_VERSION = 2             # bump when the .v2i/.txt packing below changes
-CACHE_SOURCES = ("convert.py", "timing.py", "palette.py", "font.py")
+CACHE_VERSION = 4             # bump when the .v2i packing below changes
+CACHE_SOURCES = ("convert.py", "timing.py", "palette.py")
 
 
-def cache_key(path, frame, leading, at):
-    """Everything a conversion depends on: the image, its text, the options and the
-    converter sources."""
-    h = hashlib.sha1(repr((CACHE_VERSION, timing.STANDARD, frame, leading, at)).encode())
-    txt = os.path.splitext(path)[0] + ".txt"
-    for f in [path, txt] + [os.path.join(ROOT, "vic2", s) for s in CACHE_SOURCES]:
+def cache_key(path, frame, at):
+    """Everything an image conversion depends on: the image, the options and the converter
+    sources. Not the text: make_text packs that again on every build (it is quick)."""
+    h = hashlib.sha1(repr((CACHE_VERSION, timing.STANDARD, frame, at)).encode())
+    for f in [path] + [os.path.join(ROOT, "vic2", s) for s in CACHE_SOURCES]:
         if os.path.exists(f):             # contents only: the same file may be named
             with open(f, "rb") as fh:     # by a relative or an absolute path
                 data = fh.read()
@@ -99,7 +100,7 @@ def cached_image(path, key):
             inf = json.load(f)
     except (OSError, ValueError):
         return None
-    files = [inf.get("v2i"), inf.get("expected_png")] + ([inf["txt"]] if inf.get("txt") else [])
+    files = [inf.get("v2i"), inf.get("expected_png")]
     if inf.get("key") != key or not all(f and os.path.exists(f) for f in files):
         return None
     os.utime(meta)                      # up to date (for make)
@@ -110,16 +111,23 @@ def cached_image(path, key):
 
 
 def convert_image(path, log=print, frame=False, leading=TEXT_LEADING, at=None, force=False):
-    """Convert one image to build/<name>.v2i (and its text to build/<name>.txt.prg). Reuses
-    the previous result (build/<name>.json) when nothing it depends on changed, unless
-    force."""
+    """Convert one image to build/<name>.v2i, reusing the previous result (build/<name>.json)
+    when nothing it depends on changed, unless force; then pack its text (input/<name>.txt)
+    to build/<name>.txt.prg with the current font."""
     name = os.path.splitext(os.path.basename(path))[0]
-    key = cache_key(path, frame, leading, at)
-    if not force:
-        inf = cached_image(path, key)
-        if inf:
-            log_stats(inf, log, cached=True)
-            return inf
+    key = cache_key(path, frame, at)
+    inf = None if force else cached_image(path, key)
+    if inf:
+        log_stats(inf, log, cached=True)
+    else:
+        inf = convert_new(path, name, key, log, frame, at)
+    txt = os.path.splitext(path)[0] + ".txt"
+    inf["txt"] = make_text(txt, inf["geom"], name, log, leading) if os.path.exists(txt) else None
+    return inf
+
+
+def convert_new(path, name, key, log, frame, at):
+    """convert_image without the cache and the text."""
     w, h, img = load_indexed(path)
     pos = at or ((1, 1) if frame else (0, 0))
     if frame and not convert.Geometry.frame_fits(pos[0], pos[1], w // 8, h // 8):
@@ -175,15 +183,13 @@ def convert_image(path, log=print, frame=False, leading=TEXT_LEADING, at=None, f
         hdr += v.to_bytes(2, "little")
     hdr += bytes((timing.SYSTEM_ID[timing.STANDARD], 0))
     assert len(hdr) == 26
-    assert len(hdr) + sum(len(d) for d in packed) <= 0x9800 - V2I_LOAD, \
-        "%s: .v2i too big for the players' buffer ($2000-$97ff)" % name
+    assert len(hdr) + sum(len(d) for d in packed) <= 0x9800 - PLAYER_BUF, \
+        "%s: .v2i too big for the players' buffer ($%04x-$97ff)" % (name, PLAYER_BUF)
     v2i = os.path.join(BUILD, name + ".v2i")
     with open(v2i, "wb") as f:
         f.write(V2I_LOAD.to_bytes(2, "little") + hdr + b"".join(packed))
     size = os.path.getsize(v2i) - 2
-    txt = os.path.splitext(path)[0] + ".txt"
-    txt = make_text(txt, g, name, log, leading) if os.path.exists(txt) else None
-    info = dict(txt=txt, name=name, w=w, h=h, geom=g, expected=out, size=size,
+    info = dict(name=name, w=w, h=h, geom=g, expected=out, size=size,
                 bad_lines=bad_lines, wrong_px=wrong_px, first_bad=first_bad, v2i=v2i)
     log_stats(info, log)
     # side-by-side: source | expected C64 output | wrong pixels
@@ -240,7 +246,7 @@ def write_diskshow_inc(infos, hold_secs, dual=False):
 
 def text_layout(text, font, px, height, leading=0):
     """Word-wrap paragraphs (blank-line separated) to px pixels. A paragraph starting with
-    "# " is a title. Lines are 8 + leading pixels apart in a height pixel area. Returns
+    "# " is a title. Lines are font height + leading pixels apart in a height pixel area. Returns
     [(colour, line)] and the number of lines that did not fit."""
     rows = []
     for i, para in enumerate(p for p in text.strip().split("\n\n") if p.strip()):
@@ -251,7 +257,7 @@ def text_layout(text, font, px, height, leading=0):
         if i:
             rows.append((TEXT_BODY, ""))
         rows += [(col, l) for l in font.wrap(para, px)]
-    fit = (height + leading) // (8 + leading)
+    fit = (height + leading) // (font.height + leading)
     return rows[:fit], max(0, len(rows) - fit)
 
 
@@ -269,7 +275,7 @@ def text_area(g, min_width=8):
 
 def make_text(path, g, name, log, leading=TEXT_LEADING):
     """Pack input/<name>.txt for the free area beside the image (see text_area)."""
-    from .font import screen_code
+    font = fonts.current()
     with open(path) as f:
         text = f.read()
     area = text_area(g)
@@ -277,18 +283,27 @@ def make_text(path, g, name, log, leading=TEXT_LEADING):
         log("  %s: no room for text" % name)
         return None
     col0, row0, width, height = area
-    rows, lost = text_layout(text, Font(), width * 8, height * 8, leading)
+    out = os.path.join(BUILD, name + ".txt.prg")
+    n = pack_text(text, out, col0, row0, width, height * 8, leading, name, log)
+    log("  %s: text area %dx%d at column %d, row %d: %d lines, leading %d, font %s" %
+        (name, width, height, col0, row0, n, leading, font.name))
+    return out
+
+
+def pack_text(text, out, col0, row0, width, px_height, leading, name, log):
+    """Lay text out width cells wide in px_height pixel lines and write it to out as a .v2t
+    PRG. Returns the number of lines."""
+    font = fonts.current()
+    rows, lost = text_layout(text, font, width * 8, px_height, leading)
     if lost:
         log("  %s: text does not fit, %d line(s) dropped" % (name, lost))
-    data = bytearray(b"V2T") + bytes((V2T_VERSION, col0, row0, width, len(rows), 0, leading))
+    data = bytearray(b"V2T") + bytes((V2T_VERSION, col0, row0, width, len(rows), font.height,
+                                      leading))
     for colour, line in rows:
-        data += bytes((colour, len(line))) + bytes(screen_code(c) for c in line)
-    out = os.path.join(BUILD, name + ".txt.prg")
+        data += bytes((colour, len(line))) + bytes(fonts.codes(line))
     with open(out, "wb") as f:
         f.write(V2T_LOAD.to_bytes(2, "little") + data)
-    log("  %s: text area %dx%d at column %d, row %d: %d lines, leading %d" %
-        (name, width, height, col0, row0, len(rows), leading))
-    return out
+    return len(rows)
 
 
 def disk_name(name):
@@ -351,7 +366,7 @@ class Overflow(SystemExit):
 
 def assemble(out_prg, source="slideshow.s", frame=False, defines=()):
     with open(os.path.join(BUILD, "font.inc"), "w") as f:
-        f.write(Font().asm())
+        f.write(fonts.current().asm())
     defs = []
     for d in ["FRAME=%d" % frame] + list(defines):
         defs += ["--asm-define", d]
@@ -430,7 +445,7 @@ def expected_screen(inf, frame_img=True, text=True):
     scr = Screen()
     if text and inf["txt"]:
         with open(inf["txt"], "rb") as f:
-            scr.v2t(Font(), f.read()[2:])
+            scr.v2t(fonts.current(), f.read()[2:])
     g = inf["geom"]
     if g.frame and frame_img:
         scr.paste(framed(inf["expected"]), g.col0 * 8 - 4, g.row0 * 8 - 4)
@@ -481,29 +496,44 @@ def compare_screenshot(png, exp):
 
 V2T_DEMO_TITLE = "v2t demo: text without an image"
 V2T_DEMO_FOOT = "Press any key"
-V2T_DEMO_POS = (16, 30)       # TXT_X, TXT_Y in asm/v2t-demo.s
+V2T_DEMO_X = 16               # TXT_X in asm/v2t-demo.s (TXT_Y, FOOT_Y: see v2t_demo_screen)
+V2T_DEMO_TEXT = """# A sample text
+
+No image in this build has a story (input/<name>.txt), so the v2t demo shows this one.
+
+The build wraps it by pixel width; the C64 draws the glyphs and colours the cells."""
 
 
-def write_v2t_demo_inc(inf):
-    from .font import screen_code
+def v2t_demo_text(infos):
+    """The .v2t the v2t demo draws: the first image's story, else V2T_DEMO_TEXT."""
+    story = next((inf["txt"] for inf in infos if inf["txt"]), None)
+    if story:
+        return story
+    font = fonts.current()
+    out = os.path.join(BUILD, "v2tdemo.txt.prg")
+    pack_text(V2T_DEMO_TEXT, out, 2, 0, 36, 170 - 2 * font.height, 2, "v2t demo", print)
+    return out
+
+
+def write_v2t_demo_inc(txt):
     def string(label, text):
-        return "%s: .byte %s,0" % (label, ",".join("%d" % screen_code(c) for c in text))
+        return "%s: .byte %s,0" % (label, ",".join("%d" % c for c in fonts.codes(text)))
     with open(os.path.join(BUILD, "v2tdemo.inc"), "w") as f:
-        f.write("\n".join(["        .data", 'demo_txt: .incbin "%s", 2' % inf["txt"],
+        f.write("\n".join(["        .data", 'demo_txt: .incbin "%s", 2' % txt,
                            string("demo_title", V2T_DEMO_TITLE), string("demo_foot", V2T_DEMO_FOOT)])
                 + "\n")
 
 
-def v2t_demo_screen(inf):
+def v2t_demo_screen(txt):
     """What asm/v2t-demo.s draws."""
-    from .font import screen_code
-    font, scr = Font(), Screen()
+    font, scr = fonts.current(), Screen()
     scr.clear(0, 0, 40, 25, 0xF0)
-    codes = lambda text: [screen_code(c) for c in text]
-    scr.text_line(font, (320 - font.width(V2T_DEMO_TITLE)) // 2, 8, 40, 0x10, codes(V2T_DEMO_TITLE))
-    with open(inf["txt"], "rb") as f:
-        scr.v2t(font, f.read()[2:], *V2T_DEMO_POS, lead=2)
-    scr.text_line(font, 312 - font.width(V2T_DEMO_FOOT), 184, 40, 0xB0, codes(V2T_DEMO_FOOT))
+    codes = fonts.codes
+    scr.text_line(font, max(0, 320 - font.width(V2T_DEMO_TITLE)) // 2, 8, 40, 0x10, codes(V2T_DEMO_TITLE))
+    with open(txt, "rb") as f:
+        scr.v2t(font, f.read()[2:], V2T_DEMO_X, 22 + font.height, lead=2)
+    scr.text_line(font, 312 - font.width(V2T_DEMO_FOOT), 192 - font.height, 40, 0xB0,
+                  codes(V2T_DEMO_FOOT))
     return scr
 
 
@@ -562,12 +592,11 @@ def build_system(a, images, at, standard):
         f.write('        .data\ndemo_img: .incbin "%s", 2\n' % infos[0]["v2i"])
     assemble(v2i_demo, "v2i-demo.s", frame=a.frame)
     demos.append((v2i_demo, "v2i demo"))
-    story = next((inf for inf in infos if inf["txt"]), None)
-    if story:
-        v2t_demo = os.path.join(BUILD, "v2t-demo.prg")
-        write_v2t_demo_inc(story)
-        assemble(v2t_demo, "v2t-demo.s")
-        demos.append((v2t_demo, "v2t demo"))
+    story = v2t_demo_text(infos)
+    v2t_demo = os.path.join(BUILD, "v2t-demo.prg")
+    write_v2t_demo_inc(story)
+    assemble(v2t_demo, "v2t-demo.s")
+    demos.append((v2t_demo, "v2t demo"))
     asks = []
     for img_path, inf in zip(images, infos):
         path = os.path.splitext(img_path)[0] + ".ask"
@@ -576,7 +605,11 @@ def build_system(a, images, at, standard):
             if area is None:
                 print("  ask %s: no room beside the image" % inf["name"])
                 continue
-            ask = Ask(path, inf, area, a.leading)
+            try:
+                ask = Ask(path, inf, area, a.leading)
+            except NoRoom as e:
+                print("  %s, skipped" % e)
+                continue
             ask.write_inc(os.path.join(BUILD, "ask.inc"))
             out = os.path.join(BUILD, "ask-%s.prg" % inf["name"])
             assemble(out, "ask.s", frame=a.frame)
@@ -594,7 +627,7 @@ def build_system(a, images, at, standard):
     print("disk files: " + ", ".join(name.lower() for _, name in files))
     ok = True
     if a.verify:
-        font = Font()
+        font = fonts.current()
         for inf in infos:
             write_inc([inf], 0)             # held: no re-show during the screenshot
             one = os.path.join(BUILD, "verify_%s.prg" % inf["name"])
@@ -612,9 +645,8 @@ def build_system(a, images, at, standard):
             ok &= check_in_vice(one, png, scr.pixels(), "ask " + ask.info["name"])
         ok &= check_in_vice(v2i_demo, os.path.join(BUILD, "vice_v2i_demo.png"),
                             expected_screen(infos[0], text=False).pixels(), "v2i demo")
-        if story:
-            ok &= check_in_vice(v2t_demo, os.path.join(BUILD, "vice_v2t_demo.png"),
-                                v2t_demo_screen(story).pixels(), "v2t demo")
+        ok &= check_in_vice(v2t_demo, os.path.join(BUILD, "vice_v2t_demo.png"),
+                            v2t_demo_screen(story).pixels(), "v2t demo")
         # diskshow: the first image (and its text) from a disk of its own, shown until space
         inf = infos[0]
         write_diskshow_inc([inf], 0)
@@ -706,6 +738,9 @@ def main():
     ap.add_argument("--run", action="store_true", help="launch the slideshow in VICE")
     ap.add_argument("--leading", type=int, default=TEXT_LEADING,
                     help="blank pixel lines between text lines (default %d)" % TEXT_LEADING)
+    ap.add_argument("--font", metavar="FILE.cvt[:SIZE]",
+                    help="GEOS font (Convert format) for the texts, its smallest point size "
+                         "unless SIZE is given (default: the character ROM's)")
     ap.add_argument("--at", metavar="COLUMN,ROW",
                     help="place the images at this character column and row (default 0,0; 1,1 "
                          "with -b)")
@@ -742,6 +777,9 @@ def main():
             assert len(at) == 2
         except (ValueError, AssertionError):
             ap.error("--at takes COLUMN,ROW")
+    fonts.use(a.font)
+    if a.font:
+        print("font: %s, %d pixels high" % (fonts.current().name, fonts.current().height))
     images = a.images or sorted(glob.glob(os.path.join(ROOT, "input", "*.png")))
     if a.dual:
         res = {}
