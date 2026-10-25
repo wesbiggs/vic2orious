@@ -37,10 +37,10 @@ A/Y = address means A = low byte, Y = high byte. All routines may change A, X an
 |---|---|---|
 | `v2i_init` | | `SEI`, ROMs out (`$01` = `$35`), CIA interrupts off, VIC bank 3, own IRQ/NMI vectors. Saves `$d000-$d02e`, `$dd00`/`$dd02` and `$01` for `v2i_exit`. Detects the video system (`v2i_system`, up to one frame). |
 | `v2i_detect` | | Sets `v2i_system` (see below) from the last raster line: up to one frame, interrupts held off meanwhile. Works with the KERNAL on too, before `v2i_init`, for example to pick which file to load. `v2i_init` calls it. |
-| `v2i_show` | A/Y = `.v2i` | Clears `$c000-$feff`, unpacks the image, points the IRQ at its kernel and sets the image info. Only while stopped. C=1: not shown, A = `V2I_ERR_FORMAT` (not a version 2 `.v2i`) or `V2I_ERR_SYSTEM` (the file is for the other video system, or the machine's VIC-II is not supported). |
+| `v2i_show` | A/Y = `.v2i` | Clears `$c000-$feff`, unpacks the image, points the IRQ at its kernel and sets the image info. Only while stopped. C=1: not shown, A = `V2I_ERR_FORMAT` (not a version 3 `.v2i`) or `V2I_ERR_SYSTEM` (the file is for the other video system, or the machine's VIC-II is not supported). |
 | `v2i_errmsg` | A = error | A/Y = a zero-terminated PETSCII message for an error from `v2i_show`, such as "THIS IMAGE IS FOR AN NTSC C64". Print it after `v2i_exit` (KERNAL `CHROUT`). |
 | `v2i_frame` | A = colour | Draws the 4 px frame (white, white, black, white) into the ring of cells around the image, in cell colour A (`$10`: white on black). Does nothing if the ring doesn't fit on the screen. |
-| `v2i_start` | | Raster IRQ at line 2, `CLI`. The image is displayed from the next frame on. |
+| `v2i_start` | | Border and background black, raster IRQ at line 9 (`V2I_IRQ_LINE`), `CLI`. The image is displayed from the next frame on. |
 | `v2i_stop` | | `SEI`, IRQ off, sprites off, screen blanked. |
 | `v2i_exit` | | `v2i_stop`, then restores what `v2i_init` saved (sprite registers, colours, mode, bank, `$01`), turns the CIA1 timer IRQ back on for the KERNAL, and does a `CLI`. |
 
@@ -61,9 +61,9 @@ A/Y = address means A = low byte, Y = high byte. All routines may change A, X an
 
 ## While the image is displayed
 
-The kernel takes the CPU from raster line 2 down to `v2i_end` in every frame. The rest is
-yours: for a 128-line image at the top that's about 135 of 312 lines on PAL, roughly 40%
-of the machine, and about 85 of 263 lines on NTSC. A 200-line image leaves only a few
+The kernel takes the CPU from raster line 9 down to `v2i_end` in every frame. The rest is
+yours: for a 128-line image at the top that's about 140 of 312 lines on PAL, roughly 45%
+of the machine, and about 90 of 263 lines on NTSC. A 200-line image leaves about 20
 lines on NTSC. Your main program just runs and gets interrupted.
 
 - **Text:** the v2t routines are safe to call while the image is displayed. The `ask`
@@ -73,6 +73,6 @@ lines on NTSC. Your main program just runs and gets interrupted.
 - **Music and timing:** call a SID player from `v2i_hook`, and use `v2i_ticks` for delays.
 - **Not possible:** KERNAL calls such as `LOAD` and `CHROUT` (`v2i_stop` and switch `$01`
   back first), and sprites of your own (the kernel uses all eight). Don't keep interrupts
-  disabled across line 2, or the kernel misses that frame.
+  disabled across line 9, or the kernel misses that frame.
 - **Any instruction is fine** in the main program: the kernel's entry window allows for
   the longest 6502 instructions.

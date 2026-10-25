@@ -17,6 +17,8 @@ from . import timing
 from .timing import T, Task, SchedFail
 
 SPR_START = [14 + 2 * s for s in range(8)]   # raster of each sprite's first block
+IRQ_LINE = 9          # kernel entry line (V2I_IRQ_LINE): below sprite DMA left running
+                      # past the frame end (200-line image on NTSC: up to line 8)
 ZERO_SLOT = 16        # sprite pointer of the all-zero block ($c400)
 D011 = 0x3B
 PIX_C0 = 13           # cycle in which sprite X coordinate x is drawn = PIX_C0 + x//8
@@ -94,8 +96,12 @@ class Geometry:
         return ZERO_SLOT + 1 + (k - k0) * 8 + s
 
     def sprite_lines(self):
-        last = self.raster0 + self.h + 21
-        return [range(SPR_START[s], last) for s in range(8)]
+        """DMA lines of each sprite: $d015 = 0 lands in the image's last line after the Y
+        compares (see "off" in Converter.run), so blocks starting on the line below still
+        start, none later, and a started block runs its 21 lines (possibly into the next
+        frame, which timing.Vic wraps to the top)."""
+        r = self.raster0 + self.h
+        return [range(SPR_START[s], block_start(s, block_of(s, r)) + 21) for s in range(8)]
 
 
 # ---------------------------------------------------------------- spans
@@ -274,16 +280,18 @@ class Converter:
         RASTER0, XREG0, IMG_W, IMG_H = g.raster0, g.xreg0, g.w, g.h
         slot_of = g.slot_of
         vic = timing.Vic(badlines(), g.sprite_lines())
-        entry = [T(2, c) for c in range(20, 48)]
+        entry = [T(IRQ_LINE, c) for c in range(20, 48)]
         k = timing.Kernel(vic, entry)
-        pro = [(0xD011, D011), (0xD016, 0x08), (0xD018, 0x08), (0xD020, 0), (0xD021, 0),
-               (0xD015, 0), (0xD010, 0), (0xD017, 0), (0xD01B, 0), (0xD01C, 0), (0xD01D, 0)]
+        # sprites on before sprite 0's first Y compare (line SPR_START[0] - 1, cycle 55 on
+        # PAL), so the Y registers and $d015 first ($d015 is 0 from the last frame or
+        # v2i_stop); pointers, colours and the rest are needed only from the image on
+        pro = [(REG_Y[s], SPR_START[s] - 1) for s in range(8)]
+        pro += [(0xD017, 0), (0xD015, 0xFF)]
+        pro += [(PTR[s], ZERO_SLOT) for s in range(8)]
+        pro += [(r, 0) for r in (0xD010, 0xD01B, 0xD01C, 0xD01D)]   # not $d020/$d021 (v2i_start)
+        pro += [(0xD016, 0x08), (0xD018, 0x08), (0xD011, D011)]
         for s in range(8):
-            pro.append((PTR[s], ZERO_SLOT))
-            pro.append((REG_Y[s], SPR_START[s] - 1))
-            pro.append((REG_X[s], "X%d" % s))
-            pro.append((REG_C[s], "C%d" % s))
-        pro.append((0xD015, 0xFF))
+            pro += [(REG_X[s], "X%d" % s), (REG_C[s], "C%d" % s)]
         k.prologue(pro)
         t0 = k.sync()
         self.log("  sync done at raster %d cycle %d" % (timing.raster_of(t0), timing.cyc_of(t0)))
@@ -356,9 +364,10 @@ class Converter:
                 if why:
                     self.bad_lines[y] = why
         # end of image: sprites off before any further Y compare, so no block starts without
-        # its pointer (the rest of the screen may hold text)
+        # its pointer (the rest of the screen may hold text); after the Y compares in the last
+        # line, so the blocks starting below it always start (sprite_lines models them)
         r = RASTER0 + IMG_H
-        lo = T(r - 1, pc(XREG0 + IMG_W - 1) + 1 + MARGIN)
+        lo = max(T(r - 1, pc(XREG0 + IMG_W - 1) + 1 + MARGIN), T(r - 1, timing.Y_AFTER))
         off = sch.new_task(0xD015, 0, lo, T(r, 54), "off")
         extra = [p for (B, p) in ptr_tasks if B <= r and p.id not in sch.tasks]
         sch.add([off] + extra, r)

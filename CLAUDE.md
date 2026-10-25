@@ -69,7 +69,8 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   (white/white/black/white) into the ring of cells around the image if it fits on
   screen. The `.v2i` format does not know about it. Images without room for the ring are
   not framed. `--verify` compares the frame too.
-- Each image gets its own unrolled, cycle-exact kernel, run from a raster IRQ at line 2.
+- Each image gets its own unrolled, cycle-exact kernel, run from a raster IRQ at line 9
+  (`IRQ_LINE`, `V2I_IRQ_LINE`; line 2 before `.v2i` version 3).
   It is position independent (only touches zp `$02`, VIC registers, pointers at `$c3f8`).
   Host programs run in the rest of the frame (below the image); the library's text
   routines are safe to call then.
@@ -77,7 +78,7 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   entry times ("hypotheses") and emits RMW/store instructions that land on the start of BA
   low periods until all hypotheses merge. Keep the IRQ prologue in `v2i.inc`
   (`sta/stx/sty zp`, `jsr v2i_kjump`, `jmp (v2i_kvec)`) as is; the entry window assumed in
-  `convert.py` (`T(2, 20..47)`) depends on it. It covers any interrupted instruction
+  `convert.py` (`T(IRQ_LINE, 20..47)`) depends on it. It covers any interrupted instruction
   (the `ask` verify build draws text continuously and still matches).
 - All 8 sprites run continuously in 21-line blocks with staggered phases (`SPR_START`), so
   every kernel line has the same sprite DMA. Pointer writes must land on the line before a
@@ -87,7 +88,16 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 - Y restart tasks are added 21 lines early (`fixed[B - 21]`) so EDF fills idle time with
   them; adding them at their deadline caused failures on 200-line images.
 - At the end of the image a timed `$d015 = 0` stops sprites before any new block starts
-  without its pointer (otherwise old sprite data repeats below the image).
+  without its pointer (otherwise old sprite data repeats below the image). It lands after
+  the last line's Y compares, so blocks starting on the line below always start, and
+  `sprite_lines` gives each sprite's exact DMA end: `$d015 = 0` does not stop a running
+  block. On NTSC the blocks of an image ending on raster 251 (200 lines) run on to line 8
+  of the next frame, which is why the kernel is entered on line 9 (`timing.Vic` leaves
+  DMA past the last line out). The prologue writes the Y registers and `$d015` first, so
+  sprite 0 is on before its first compare (line 13).
+- No border/background writes in the kernel: an 85xx VIC-II (VICE emulates it) shows a
+  grey dot for a colour register write, and lines 9-11 are visible on NTSC (a dot left of
+  the image broke `compare_screenshot`'s alignment). `v2i_start` sets them.
 - Pixel timing: sprite X coordinate x is drawn in cycle `PIX_C0 + x // 8` (13), with
   `MARGIN = 1` cycle on each side of every edge. Validated against VICE; changing either
   needs a `--verify` run. The same on NTSC (X = 0 falls in cycle 13 on both chips).
@@ -208,6 +218,10 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 - NTSC sprite DMA from Bauer's vic-ii.txt alone: its 6567R8 diagram is abbreviated and
   reads as sprites 0-2 at 60/62/64 with 3-7 unchanged; that gave ~2300 wrong pixels in
   VICE, and guessed shifts did not converge. VICE's cycle tables (above) gave 0.
+- 200-line NTSC images with entry on line 2: modelling the leftover DMA in lines 0-8
+  failed (the first frame has none; the sync then lands wrong, no block starts, so the
+  next frame has none either: a stable state without sprites). Tracking hypotheses for
+  both cases spread them ~60 cycles and the sync ran to line 86. Entry on line 9 fixed it.
 
 ## Ideas not done yet
 

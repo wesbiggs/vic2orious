@@ -77,17 +77,24 @@ class Vic:
     """BA (bus available) timeline for a frame."""
 
     def __init__(self, badlines, sprite_lines):
-        """badlines: iterable of raster lines; sprite_lines[s]: rasters on which sprite s is displayed."""
+        """badlines: iterable of raster lines; sprite_lines[s]: rasters on which sprite s is
+        displayed. Lines past the frame's last one are left out."""
         self.n = (LINES + 1) * CYCLES + 200
         ba = bytearray(self.n)
         for r in badlines:
             for c in range(12, 55):
                 ba[T(r, c)] = 1
+        # $d015 = 0 does not stop a running sprite DMA: it ends with its 21-line block, which
+        # can run past the last line (200-line image on NTSC) into the top of the next frame.
+        # It ends by line 8, before the kernel's entry line (convert.IRQ_LINE), so it is
+        # left out here.
+        frame = LINES * CYCLES
         for s, lines in enumerate(sprite_lines):
             for d in lines:
                 tp = p_time(s, d)
                 for t in range(tp - 3, tp + 2):
-                    ba[t] = 1
+                    if t < frame:
+                        ba[t] = 1
         self.ba = ba
         # wb[t]: a write cycle is not possible at t (BA low for 4+ cycles -> AEC low)
         wb = bytearray(self.n)
@@ -148,11 +155,15 @@ class Kernel:
 
     def prologue(self, writes):
         """writes: list of (reg, value or patch-name)."""
+        a = None
         for reg, val in writes:
             if isinstance(val, str):
                 self.patches[val] = len(self.code) + 1
-                val = 0
-            self._emit_h("lda#", val)
+                self._emit_h("lda#", 0)
+                a = None
+            elif val != a:
+                self._emit_h("lda#", val)
+                a = val
             self._emit_h("sta", reg & 0xFF, reg >> 8)
 
     def sync(self, max_steps=400):

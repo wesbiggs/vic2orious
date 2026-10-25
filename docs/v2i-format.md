@@ -1,4 +1,4 @@
-# .v2i image format (version 2)
+# .v2i image format (version 3)
 
 A `.v2i` file holds one converted image: a hires bitmap, its cell colours, the sprite data,
 and a *kernel*. The kernel is 6502 code generated for this image that rewrites the sprite
@@ -17,7 +17,7 @@ All words are little endian. Offsets are from the start of the data, after the P
 | offset | size | field |
 |---|---|---|
 | 0 | 3 | magic `"V2I"` |
-| 3 | 1 | format version, 2 |
+| 3 | 1 | format version, 3 |
 | 4 | 1 | width in cells (width / 8) |
 | 5 | 1 | height in cells (height / 8) |
 | 6 | 1 | character column of the image's left edge |
@@ -34,7 +34,8 @@ All words are little endian. Offsets are from the start of the data, after the P
 | 25 | 1 | reserved, 0 |
 | 26 | ... | kernel, then the bitmap, screen and sprite streams, back to back |
 
-Version 1 had no video system byte (always PAL) and a 24-byte header.
+Version 2 kernels were entered on raster line 2 (same layout). Version 1 had no video
+system byte (always PAL) and a 24-byte header.
 
 ## Streams
 
@@ -57,11 +58,14 @@ wrong cycle (`v2i_show` refuses such a file). The sprite and bitmap data are con
 together with the kernel, so they differ between PAL and NTSC files too. It assumes:
 
 - **Screen layout:** VIC bank 3 (`$c000-$ffff`), with the screen at `$c000`, sprite
-  pointers at `$c3f8` and the bitmap at `$e000`. It sets `$d011` = `$3b`, `$d016` = `$08`,
-  `$d018` = `$08` and the border and background to black, but doesn't select the bank
-  itself.
-- **Entry time:** it is entered on raster line 2, between cycles 20 and 47 of that line.
-  `v2i.inc`'s IRQ handler (raster IRQ at line 2, then `STA`/`STX`/`STY` to zero page,
+  pointers at `$c3f8` and the bitmap at `$e000`. It sets `$d011` = `$3b`, `$d016` = `$08` and
+  `$d018` = `$08`, but doesn't select the bank itself or touch the border and background
+  colours (`v2i_start` sets them to black: a colour write leaves a grey dot on the 85xx,
+  and the kernel's first lines are visible on NTSC).
+- **Entry time:** it is entered on raster line 9, between cycles 20 and 47 of that line.
+  Line 9 is below the sprite DMA that can still be running from the previous frame:
+  `$d015` = 0 does not stop a sprite's 21-line block, and on NTSC (263 lines) the blocks
+  of a 200-line image run on to line 8. `v2i.inc`'s IRQ handler (raster IRQ at line 9, then `STA`/`STX`/`STY` to zero page,
   `JSR`, `JMP (vector)`) gets there from any interrupted instruction. The kernel's first
   instructions sync to the exact cycle, so the entry time can vary within that window.
 - **No DMA surprises:** nothing else may change VIC registers or steal cycles while it

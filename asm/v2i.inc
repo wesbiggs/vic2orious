@@ -7,7 +7,7 @@
 ;                  detects PAL/NTSC (v2i_detect)
 ;   v2i_detect     v2i_system = V2I_PAL, V2I_NTSC or V2I_OTHER (also before v2i_init)
 ;   v2i_show       A/Y = .v2i: unpack it into VIC bank 3 (stopped only). C=1: not shown,
-;                  A = V2I_ERR_FORMAT (not a version 2 .v2i) or V2I_ERR_SYSTEM (made for
+;                  A = V2I_ERR_FORMAT (not a version 3 .v2i) or V2I_ERR_SYSTEM (made for
 ;                  the other video system, or an unsupported VIC-II)
 ;   v2i_errmsg     A = error from v2i_show: A/Y = zero-terminated message (PETSCII)
 ;   v2i_frame      A = colour: frame around the image (needs the ring of cells around it)
@@ -38,6 +38,8 @@ V2I_H_SIZE = 26
 V2I_PAL    = 0                          ; 6569 (and 8565): 63 cycles x 312 lines
 V2I_NTSC   = 1                          ; 6567R8 (and 8562): 65 cycles x 263 lines
 V2I_OTHER  = $ff                        ; anything else (6567R56A, ...): not supported
+
+V2I_IRQ_LINE = 9                        ; raster IRQ line, kernel entry (IRQ_LINE in convert.py)
 
 V2I_ERR_FORMAT = 1
 V2I_ERR_SYSTEM = 2
@@ -123,7 +125,10 @@ v2i_detect:
 
 ; ---- start/stop the raster interrupt that runs the kernel
 v2i_start:
-        lda #2
+        lda #0                          ; border and background (not in the kernel: on
+        sta $d020                       ; the 85xx a colour write shows a grey dot, and
+        sta $d021                       ; its entry line is visible on NTSC)
+        lda #V2I_IRQ_LINE
         sta $d012
         lda #$3b
         sta $d011
@@ -508,7 +513,7 @@ v2i_unrle:
 
 ; ---- data and state
 
-v2i_magic: .byte "V2I", 2
+v2i_magic: .byte "V2I", 3
 v2i_system: .byte V2I_PAL               ; set by v2i_init
 v2i_hook:  .word v2i_rts                ; called after the kernel every frame, may use A/X/Y
 v2i_ticks: .byte 0                      ; incremented every frame

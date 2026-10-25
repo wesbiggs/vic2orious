@@ -37,7 +37,7 @@ from .screen import Screen
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUILD = os.path.join(ROOT, "build", "pal")  # build/ntsc with --ntsc (see use_system)
 ASM = os.path.join(ROOT, "asm")
-V2I_VERSION = 2
+V2I_VERSION = 3
 V2I_LOAD = 0x2000
 PLAYER_BUF = 0x2800           # diskshow and viewer load images here, texts at $9800
 V2T_LOAD = 0x1800
@@ -66,7 +66,7 @@ def rle_zero(data):
     return out + b"\0\0"
 
 
-CACHE_VERSION = 4             # bump when the .v2i packing below changes
+CACHE_VERSION = 5             # bump when the .v2i packing below changes
 CACHE_SOURCES = ("convert.py", "timing.py", "palette.py")
 
 

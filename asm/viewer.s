@@ -203,7 +203,7 @@ print:  sta vptr                        ; print zero-terminated string at A/Y
         bne @p
 @done:  rts
 
-magic:  .byte "V2I", 2
+magic:  .byte "V2I", 3
 tmagic: .byte "V2T", 4
 txtext: .byte ".TXT"
 msg_prompt:

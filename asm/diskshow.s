@@ -287,7 +287,7 @@ namebuf: .res 16
 .endif
 hold:   .word 0                         ; frames per image (0: until space)
 fps:    .byte 0
-magic:  .byte "V2I", 2
+magic:  .byte "V2I", 3
 tmagic: .byte "V2T", 4
 msg_loading:
         .byte "LOADING ", 0
