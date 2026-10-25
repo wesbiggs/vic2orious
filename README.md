@@ -81,8 +81,8 @@ red). Outputs:
 - `build/diskshow.prg`: the same slideshow for any number of images, loading each one
   (and its story) from disk in turn and showing it for `HOLD` seconds (space: next).
   Loading uses the KERNAL, so it is slow (around half a minute per image with true drive
-  emulation), and the image can't stay up meanwhile: the text screen says what is
-  loading. RUN/STOP returns to BASIC.
+  emulation; `make run-diskshow FAST=1` loads instantly), and the image can't stay up
+  meanwhile: the text screen says what is loading. RUN/STOP returns to BASIC.
 - `build/ask-<name>.prg`: the ask demo for every image with an `.ask` file.
 - `build/v2i-demo.prg`, `build/v2t-demo.prg`: the smallest programs using just one of the
   two libraries (an image; text without an image).
@@ -95,6 +95,7 @@ red). Outputs:
 ```bash
 make run                              # the slideshow
 make run-diskshow                     # the disk slideshow (all images)
+make run-diskshow FAST=1              # same, with instant loading (also run-viewer, run-d64)
 make run-viewer IMAGE=princess        # the disk viewer, with the image name typed in
 make run-ask ASK=princess             # the ask demo
 make run-v2i                          # image only

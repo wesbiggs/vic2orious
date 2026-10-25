@@ -15,6 +15,8 @@ LEADING ?=                      # pixel lines between text lines (default 2)
 AUTO    ?=                      # frames per slideshow image (default 250, 0: until space)
 HOLD    ?=                      # seconds per diskshow image (default 15, 0: until space)
 DISK    ?=                      # d64 or d81 (default: d64 if everything fits, else d81)
+FAST    ?=                      # 1: run-diskshow/-viewer/-d64 load instantly (no true drive
+                                #    emulation; VICE handles the KERNAL's disk calls)
 IMAGE   ?=                      # run-viewer: image name to type at the prompt
 ASK     ?= princess             # run-ask: which ask-<name>.prg
 
@@ -30,9 +32,11 @@ JSONS   := $(foreach p,$(PNGS),build/$(basename $(notdir $(p))).json)
 SOURCES := $(wildcard input/* vic2/*.py asm/*)
 STAMP   := build/.built
 
-# the disk the build made (.d64 or .d81) and the drive VICE needs for it
+# the disk the build made (.d64 or .d81) and the drive VICE needs for it (FAST=1: no true
+# drive emulation, VICE traps the KERNAL's serial bus calls instead)
 DISKIMG  = $$(ls build/vic2orious.d81 2>/dev/null || echo build/vic2orious.d64)
-DRIVE    = $$(test -e build/vic2orious.d81 && echo -drive8type 1581)
+DRIVE    = $$(test -e build/vic2orious.d81 && echo -drive8type 1581) \
+           $(if $(strip $(FAST)),+drive8truedrive -trapdevice8)
 
 .PHONY: all build convert verify run run-slideshow run-diskshow run-viewer run-ask run-v2i \
         run-v2t run-d64 clean help FORCE
@@ -107,3 +111,4 @@ help:
 	@echo "make run-d64        boot the disk (.d64, or .d81 when the images need it)"
 	@echo "make clean          remove build/"
 	@echo "options: IMAGES='input/a.png ...' FRAME=1 AT=COLUMN,ROW LEADING=n AUTO=n HOLD=n DISK=d64|d81"
+	@echo "         FAST=1 (run targets using the disk: instant loading)"

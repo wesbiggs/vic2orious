@@ -123,10 +123,15 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 - Requires Python 3 with Pillow, cc65 (`cl65`), VICE (`x64sc`, `c1541`). The VICE palette
   and character ROM paths are hardcoded for Homebrew (`/opt/homebrew/share/vice/C64/`).
 - VICE notes: screenshots are not exactly Pepto even with `-VICIIpalette pepto-pal.vpl`, so
-  `compare_screenshot` maps colours by majority vote. Disk loading in headless tests only
-  works with true drive emulation (the default); `-virtualdev8` does not exist in this VICE.
+  `compare_screenshot` maps colours by majority vote. Disk loading works with true drive
+  emulation (the default; a 12-16K image takes ~25M cycles, the viewer test with autostart
+  ~90M) or, near instantly, with `+drive8truedrive -trapdevice8` (VICE traps the KERNAL's
+  serial calls; `+drive8truedrive` alone loads nothing, and `-virtualdev8` does not exist
+  in this VICE). The Makefile's `FAST=1` adds both; checked with diskshow on the D81, 0
+  differing pixels. `--verify` still uses true drive emulation. A PRG that is not on the
+  attached disk needs `-autostartprgmode 1` (otherwise VICE looks for it on the disk).
   The viewer test pattern: `-8 build/vic2orious.d64 -autostart build/viewer.prg -keybuf
-  'princess\n'` (loading takes ~90M cycles with true drive emulation).
+  'princess\n'`.
 - Memory: the slideshow PRG must fit `$0801-$bfff` (about 46K); each image is 9-15K, so
   3-4 images. With more, `assemble_slideshow` keeps the longest prefix that assembles;
   `diskshow` gets all of them (names baked in from `build/diskshow.inc`, loaded like the
