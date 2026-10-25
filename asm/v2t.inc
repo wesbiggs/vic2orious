@@ -12,6 +12,7 @@
 ;                  then v2t_y += H + v2t_lead. C=1: clipped
 ;   v2t_measure    A/Y = 0-terminated text: width in pixels in A (low), X (high)
 ;   v2t_clear      A = colour: clear v2t_cols x v2t_rows cells from v2t_col, v2t_row
+;   v2t_paint      A = colour: colour the same cells, leaving the bitmap as it is
 ;
 ; The bitmap (V2T_BITMAP, 8000 bytes) and screen (V2T_SCREEN, the cell colours) default to
 ; $e000 and $c000, where v2i.inc puts them; define them before the include to draw
@@ -188,6 +189,15 @@ v2t_measure:
 ; clear v2t_cols x v2t_rows cells from column v2t_col, row v2t_row: bitmap 0, colour A
 v2t_clear:
         sta v2t_tclr
+        lda #8
+        bne v2t_tarea
+
+; colour v2t_cols x v2t_rows cells from column v2t_col, row v2t_row: colour A, bitmap untouched
+v2t_paint:
+        sta v2t_tclr
+        lda #0                          ; ce = 0: no bitmap bytes
+v2t_tarea:
+        sta v2t_ce
         lda v2t_col
         sta v2t_tcol
         lda v2t_cols
@@ -195,8 +205,6 @@ v2t_clear:
         jsr v2t_tclamp
         lda #0
         sta v2t_cs
-        lda #8
-        sta v2t_ce
         lda v2t_row
         sta v2t_trow
         lda v2t_rows
@@ -206,8 +214,10 @@ v2t_clear:
         cmp #25
         bcs @done
         tax
+        lda v2t_ce
+        beq :+
         jsr v2t_tzero
-        ldx v2t_trow
+:       ldx v2t_trow
         jsr v2t_tcolour
         inc v2t_trow
         dec v2t_tleft

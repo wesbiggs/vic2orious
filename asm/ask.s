@@ -99,8 +99,17 @@ main:   jsr scan
         jmp main
 .endif
 
-pick:   stx sel                         ; answer topic X
-        jsr menu
+pick:   txa                             ; answer topic X
+        pha
+        ldx sel                         ; recolour the menu: old topic back to normal
+        bmi :+
+        lda #C_BODY
+        jsr mpaint
+:       pla
+        tax
+        stx sel
+        lda #C_HILITE
+        jsr mpaint
         lda sel
         clc
         adc #1
@@ -156,17 +165,14 @@ answer: tax                             ; clear the answer area, draw answer A l
         jmp @line
 @done:  rts
 
-menu:   lda #ASK_MENU_Y                 ; one line per topic, the one in sel highlighted
+menu:   lda #ASK_MENU_Y                 ; one line per topic, drawn once (pick recolours)
         sta v2t_y
         lda #ASK_MENU_LEAD              ; each starts a character row
         sta v2t_lead
+        lda #C_BODY
+        sta v2t_color
         ldx #0
 @m:     stx mi
-        lda #C_BODY
-        cpx sel
-        bne :+
-        lda #C_HILITE
-:       sta v2t_color
         lda ask_lbl_lo,x
         ldy ask_lbl_hi,x
         jsr v2t_line
@@ -175,6 +181,16 @@ menu:   lda #ASK_MENU_Y                 ; one line per topic, the one in sel hig
         cpx #ASK_N
         bne @m
         rts
+
+mpaint: pha                             ; menu line X: colour A
+        lda ask_menu_row,x
+        sta v2t_row
+        lda #ASK_COL
+        sta v2t_col
+        lda #ASK_LINE_ROWS
+        sta v2t_rows
+        pla
+        jmp v2t_paint
 
 ; X = index of the topic whose key is down (C=0), C=1 if none; space leaves to BASIC
 scan:   ldx #ASK_N - 1

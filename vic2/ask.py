@@ -12,7 +12,7 @@ from . import font as fonts
 
 C_TITLE = (1 << 4) | 0        # white on black
 C_BODY = (15 << 4) | 0        # light grey on black
-C_HILITE = (0 << 4) | 15      # black on light grey: the topic being answered
+C_HILITE = (7 << 4) | 0        # yellow on black: the topic being answered
 C_FOOT = (11 << 4) | 0        # dark grey on black
 STRESS = "The quick brown fox jumps over the lazy dog, again and again and again."
 
@@ -90,10 +90,13 @@ class Ask:
                "ASK_ANS_Y = %d" % (self.ans_row * 8), "ASK_FOOT_Y = %d" % (self.foot_row * 8),
                "ASK_LEAD = %d" % self.leading,
                "ASK_MENU_LEAD = %d" % (self.line_rows * 8 - fonts.current().height),
+               "ASK_LINE_ROWS = %d" % self.line_rows,
                "C_TITLE = $%02x" % C_TITLE, "C_BODY = $%02x" % C_BODY,
                "C_HILITE = $%02x" % C_HILITE, "C_FOOT = $%02x" % C_FOOT, "", "        .data",
                string("ask_title", self.title or ""), string("ask_foot", self.foot),
                string("ask_stress", STRESS),
+               "ask_menu_row: .byte %s" % ",".join(
+                   "%d" % (self.menu_row + i * self.line_rows) for i in range(n)),
                "ask_key: .byte %s" % ",".join("%d" % k for k, _, _ in self.topics),
                "ask_lbl_lo: .byte %s" % ",".join("<lbl%d" % i for i in range(n)),
                "ask_lbl_hi: .byte %s" % ",".join(">lbl%d" % i for i in range(n)),

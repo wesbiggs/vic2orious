@@ -37,11 +37,11 @@ Colours are cell colours, `fg << 4 | bg`: `$f0` is light grey on black.
 | `v2t_line` | A/Y = text | One line, ending in a 0 byte: clears the H pixel lines at `v2t_y` across `v2t_cols` cells starting at cell `v2t_x / 8`, colours those cells `v2t_color` (every character row the H lines touch), draws the text from pixel `v2t_x`, then adds `H + v2t_lead` to `v2t_y`. C=1: the text was clipped at the right edge. |
 | `v2t_measure` | A/Y = text | Pixel width of the line: A = low byte, X = high byte. |
 | `v2t_clear` | A = colour | Clears `v2t_cols` x `v2t_rows` cells from `v2t_col`, `v2t_row` (bitmap 0, cell colour A). |
+| `v2t_paint` | A = colour | Colours the same cells as `v2t_clear` (cell colour A) and leaves the bitmap as it is: recolours text without drawing it again. |
 
 `v2t_draw` and `v2t_draw_at` OR into whatever is already there, so `v2t_clear` the area
 before drawing over old text. `v2t_line` clears its own H lines, and it colours all
-`v2t_cols` cells, so a background colour fills the line evenly to the right. That's how
-the `ask` demo draws its highlight bar. Text below row 24, and glyphs past the right edge
+`v2t_cols` cells, so a background colour fills the line evenly to the right. Text below row 24, and glyphs past the right edge
 of the cells, are cut off.
 
 ## Parameters
