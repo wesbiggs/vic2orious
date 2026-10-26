@@ -552,16 +552,22 @@ turns: while one is shown, the main loop prepares the other one char row further
 the row boundary the raster IRQ switches banks and resets the fine scroll."""
 
 
-def scroll_page(images, leading):
-    """The scroll demo's page: the intro, then every image's story. [(colour, text, page y)]
-    of the non-empty lines, and the page height."""
-    font = fonts.current()
-    texts = [SCROLL_INTRO]
+def stories(images):
+    """The text of every image's story (input/<name>.txt), in image order."""
+    texts = []
     for p in images:
         t = os.path.splitext(p)[0] + ".txt"
         if os.path.exists(t):
             with open(t) as f:
                 texts.append(f.read())
+    return texts
+
+
+def scroll_page(images, leading):
+    """The scroll demo's page: the intro, then every image's story. [(colour, text, page y)]
+    of the non-empty lines, and the page height."""
+    font = fonts.current()
+    texts = [SCROLL_INTRO] + stories(images)
     rows = []
     for t in texts:
         if rows:
@@ -636,18 +642,138 @@ def scroll_screen(lines, height, v):
     return scr.pixels(v, 192)
 
 
-def check_in_vice(prg, png, exp, label, retry=True):
-    """Screenshot prg in VICE and compare with exp. A failed check runs once more: VICE's
-    autostart now and then leaves the machine at the READY prompt (the kernels are
-    deterministic, so a real fault fails both times)."""
-    if not vice_screenshot(prg, png):
+STREAM_RATE = 3               # bytes the stream demo receives per frame (0: all at once)
+STREAM_WMAX = 40              # WMAX, LMAX in asm/stream.s: a word is split after WMAX
+STREAM_LMAX = 150             # characters, a line ends before it would pass LMAX
+STREAM_INTRO = """# v2t stream demo
+
+The text arrives as a stream of plain ASCII, %s, and the C64 wraps it itself: word by
+word, by pixel width, into a ring of lines. A line feed is a space, two of them end a
+paragraph, and a paragraph that starts with "# " is a title. Each word is drawn as soon as
+it is complete, and the page scrolls smoothly, one pixel per frame, whenever the newest
+line reaches the bottom. Lines that have scrolled off the top are dropped from the ring;
+while the ring is full, the stream waits. Space returns to BASIC."""
+
+
+def stream_bytes(texts):
+    """The stream: texts separated by blank lines, as character codes (32-127) and line
+    feeds (10)."""
+    out = bytearray()
+    for i, t in enumerate(texts):
+        if i:
+            out += b"\n\n"
+        for ch in t.replace("\r", ""):
+            out.append(10 if ch == "\n" else fonts.code(ch))
+    return bytes(out)
+
+
+def stream_layout(data, leading):
+    """The lines asm/stream.s makes of the stream data: [(colour, text, page y)] and the page
+    height (8 pixels below the last line). Line feed: a space; two in a row: a paragraph
+    ends (one blank line before the next); other codes up to 32: a space; a first word "#":
+    the paragraph is a title. Greedy wrap as Font.wrap, plus the WMAX/LMAX limits."""
+    font = fonts.current()
+    pitch, px = font.height + leading, SCROLL_COLS * 8
+    width = lambda cs: sum(font.glyph(c)[1] for c in cs)
+    lines, st = [], dict(cur=None, had=False, title=False, anyp=False, y=SCROLL_TOP)
+    word, nl = [], 0
+
+    def place(w):
+        if not st["had"]:
+            if not st["title"] and w == [35]:
+                st["title"] = True
+                return
+            st["had"] = True
+            if st["anyp"]:
+                st["y"] += pitch
+            st["cur"] = None
+        cur = st["cur"]
+        if (cur is not None and width(cur[1] + [32] + w) - font.hang <= px
+                and len(cur[1]) + 1 + len(w) <= STREAM_LMAX):
+            cur[1] += [32] + w
+        else:
+            st["cur"] = [TEXT_TITLE if st["title"] else TEXT_BODY, list(w), st["y"]]
+            lines.append(st["cur"])
+            st["y"] += pitch
+
+    def endword():
+        if word:
+            place(word[:])
+            del word[:]
+
+    def endpara():
+        endword()
+        st["cur"] = None
+        if st["had"]:
+            st["anyp"] = True
+        st["had"] = st["title"] = False
+
+    for b in data:
+        if b == 10:
+            endword()
+            nl += 1
+            if nl == 2:
+                endpara()
+        elif b <= 32:
+            endword()
+            nl = 0
+        else:
+            nl = 0
+            if len(word) == STREAM_WMAX:
+                endword()
+            word.append(b)
+    endpara()
+    out = [(c, "".join(chr(x) for x in t), y) for c, t, y in lines]
+    return out, (out[-1][2] + font.height + 8 if out else 0)
+
+
+def write_stream_inc(data, rate, leading):
+    font = fonts.current()
+    out = ["STM_RATE = %d" % rate, "STM_PITCH = %d" % (font.height + leading),
+           "STM_X = %d" % SCROLL_X, "STM_PX = %d" % (SCROLL_COLS * 8), "STM_TOP = %d" % SCROLL_TOP,
+           "STM_TITLE = $%02x" % TEXT_TITLE, "STM_BODY = $%02x" % TEXT_BODY,
+           "WMAX = %d" % STREAM_WMAX, "LMAX = %d" % STREAM_LMAX,
+           "        .data", "stm_data:"]
+    for i in range(0, len(data), 32):
+        out.append("        .byte " + ",".join("%d" % b for b in data[i:i + 32]))
+    out.append("stm_end:")
+    with open(os.path.join(BUILD, "stream.inc"), "w") as f:
+        f.write("\n".join(out) + "\n")
+
+
+def build_stream(images, leading, out, rate=STREAM_RATE, repeat=1, defines=(), log=print):
+    """Assemble asm/stream.s with the intro and the stories (repeat times) as its stream,
+    as much as fits below SCROLL_END. Returns (lines, page height, final v, stream size)."""
+    font = fonts.current()
+    if font.height > 8 * SCROLL_VOFF:
+        raise SystemExit("stream demo: fonts up to %d pixels high" % (8 * SCROLL_VOFF))
+    how = "%d bytes a frame" % rate if rate else "all at once"
+    data = stream_bytes([STREAM_INTRO % how] + stories(images) * repeat)
+    n = len(data)
+    while True:
+        write_stream_inc(data[:n], rate, leading)
+        assemble(out, "stream.s", defines=defines)
+        if 0x0801 + os.path.getsize(out) - 2 <= SCROLL_END:
+            break
+        n = n * 9 // 10
+    if n < len(data):
+        log("  stream demo: the first %d of %d bytes fit" % (n, len(data)))
+    lines, height = stream_layout(data[:n], leading)
+    return lines, height, max(0, height - 192), n
+
+
+def check_in_vice(prg, png, exp, label, retry=True, cycles=10_000_000):
+    """Screenshot prg in VICE (after cycles) and compare with exp. A failed check runs once
+    more: VICE's autostart now and then leaves the machine at the READY prompt (the kernels
+    are deterministic, so a real fault fails both times)."""
+    if not vice_screenshot(prg, png, cycles):
         print("  %s: no screenshot" % label)
         return False
     res = compare_screenshot(png, exp)
     if (res is None or res[2]) and retry:
         print("  %s: %s, running it again" % (
             label, "nothing found" if res is None else "%d differing pixels" % len(res[2])))
-        return check_in_vice(prg, png, exp, label, retry=False)
+        return check_in_vice(prg, png, exp, label, retry=False, cycles=cycles)
     if res is None:
         print("  %s: nothing found in the screenshot" % label)
         return False
@@ -699,6 +825,9 @@ def build_system(a, images, at, standard):
     scroll = os.path.join(BUILD, "scroll-demo.prg")
     build_scroll(images, a.leading, scroll)
     demos.append((scroll, "scroll demo"))
+    stream = os.path.join(BUILD, "stream-demo.prg")
+    build_stream(images, a.leading, stream)
+    demos.append((stream, "stream demo"))
     asks = []
     for img_path, inf in zip(images, infos):
         path = os.path.splitext(img_path)[0] + ".ask"
@@ -763,6 +892,19 @@ def build_system(a, images, at, standard):
         build_scroll(images, a.leading, one, ["AUTO=2", "AUTO_N=%d" % n], log=lambda *x: None)
         ok &= check_in_vice(one, os.path.join(BUILD, "vice_scroll_timing.png"),
                             scroll_screen(lines, height, n), "scroll demo (%d frames)" % n)
+        # stream demo: the last screen, once the stream is in; STALLS colours the border if
+        # the scroll ever had to wait. All at once and 4 times over (the rings wrap, the
+        # stream waits for room), and at STREAM_RATE
+        one = os.path.join(BUILD, "verify_stream.prg")
+        for rate, rep in ((0, 4), (STREAM_RATE, 1)):
+            lines, height, v, n = build_stream(images, a.leading, one, rate=rate, repeat=rep,
+                                               defines=["STALLS=1"], log=lambda *x: None)
+            frames = (n // rate if rate else 0) + v + 100
+            ok &= check_in_vice(one, os.path.join(BUILD, "vice_stream_%d.png" % rate),
+                                scroll_screen(lines, height, v),
+                                "stream demo (%d lines, %s)" % (len(lines), "rate %d" % rate if rate
+                                                                 else "all at once"),
+                                cycles=3_000_000 + 25_000 * frames)
         # diskshow: the first image (and its text) from a disk of its own, shown until space
         inf = infos[0]
         write_diskshow_inc([inf], 0)

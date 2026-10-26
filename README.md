@@ -130,6 +130,9 @@ red). Outputs, in `build/pal/` (or `build/ntsc/`):
   pixel per frame (cursor down, cursor up or a joystick in port 2; space returns to
   BASIC). It uses the VIC's fine scroll and two bitmaps taking turns: v2t draws only the
   char row that scrolls in. Pages are up to 255 lines, as many as fit in memory.
+- `stream-demo.prg`: the same stories arriving as a stream of plain ASCII text (3 bytes
+  a frame), which the C64 wraps itself, word by word, into a ring of lines, scrolling
+  smoothly as the newest line reaches the bottom. Space returns to BASIC.
 - `vic2orious.d64`: disk with `viewer`, `diskshow`, `slideshow`, the demos, and every
   image and story as separate files. When they do not fit on a 1541 disk (about 13
   images) it is `vic2orious.d81` (1581, about 60 images) instead.
@@ -145,6 +148,7 @@ make run-ask ASK=princess             # the ask demo
 make run-v2i                          # image only
 make run-v2t                          # text only
 make run-scroll                       # smooth scrolling text
+make run-stream                       # streamed text, wrapped and scrolled on the C64
 make run-d64                          # boot the disk (.d64 or .d81; starts the viewer)
 ```
 

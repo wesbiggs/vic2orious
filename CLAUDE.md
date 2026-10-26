@@ -4,8 +4,8 @@ Converts C64-palette PNGs into C64 hires bitmap + per-line multiplexed hires spr
 for pixel-perfect output, and plays the results on a real (emulated) C64: a slideshow PRG
 with the images embedded, a disk slideshow (`diskshow`) that loads every image in turn, a
 viewer PRG that loads `.v2i` image files (plus optional `.txt` narrative files drawn
-beside the picture) from disk by name, an interactive `ask` demo, and a smooth scroll
-demo for text.
+beside the picture) from disk by name, an interactive `ask` demo, and two smooth
+scrolling text demos (a prepared page; a stream the C64 wraps itself).
 The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.inc`
 (text), that other programs can include. Apache-2.0 licensed (`LICENSE`).
 
@@ -40,7 +40,8 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   Each stands alone (own zero page block, own row address helper, prefixed names).
   `asm/slideshow.s`, `asm/diskshow.s`, `asm/viewer.s` and `asm/ask.s` use both;
   `asm/v2i-demo.s`,
-  `asm/v2t-demo.s` (KERNAL on, bitmap in bank 1) and `asm/scroll.s` use one.
+  `asm/v2t-demo.s` (KERNAL on, bitmap in bank 1), `asm/scroll.s` and `asm/stream.s` use
+  one.
 - `docs/`: `v2i-format.md`, `v2t-format.md` (incl. the font), `v2i-lib.md`, `v2t-lib.md`.
   Keep them in sync with the code.
 - `tools/png2c64.py`: the user's quick quantiser (picture -> Pepto palette). `-o FILE` or
@@ -166,6 +167,22 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   against ~126k on NTSC, ~148k on PAL; anything that makes text drawing slower can make
   it hitch on NTSC, which `--verify`'s timing check (`AUTO=2`: N frames down must end
   at line N) catches.
+- Stream demo (`asm/stream.s`, `build_stream`/`stream.inc`): the same display, downwards
+  only, but the C64 lays out the text: a byte stream (`stm_data`, `STM_RATE` bytes a
+  frame) is word-wrapped by pixel width (`stream_layout` is the Python model: line feed
+  = space, two = paragraph, first word "#" = title, WMAX/LMAX limits; for normal text it
+  matches `text_layout`) into a ring of `LN` line slots and a text ring (`$4400-$5aff`,
+  each line contiguous, LMAX + 1 bytes reserved). Each finished word is drawn into the
+  front and, if it holds base + 8, the back; `render` finds the lines of row 24 by
+  walking the ring from `tail`. Lines above the front are dropped; the stream waits for
+  `room`. The back is prepared as soon as it isn't base + 8 (eagerly: preparing only once
+  the target needed it stalled the scroll a few frames whenever a line arrived at rest),
+  and the stream is only read while the back is ready, so the scroll never waits (0
+  stalls on PAL and NTSC, rates 0-64); copying a word's cells into the back instead of
+  drawing it twice made no difference and was dropped. `STALLS=1` counts waits into the
+  border; `--verify` uses it, so a wait fails the check. It writes `$d020` only on a wait:
+  writing it every frame left the 85xx colour-write dot on a visible NTSC line, which
+  broke `compare_screenshot`'s alignment.
 
 ## Working in the repo
 
@@ -194,7 +211,8 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   drawing a black-on-black line) and compares with `Ask.model`; the v2i demo against the
   first image and the v2t demo against `v2t_demo_screen`; the scroll demo scrolls itself
   (`AUTO=1`: down, then back up; `AUTO=2`: the timing check) and is compared with
-  `scroll_screen`. If text rendering
+  `scroll_screen`, as is the stream demo's last screen (all at once, 4 times over, so both
+  rings wrap; and at `STREAM_RATE`; built `STALLS=1`). If text rendering
   changes, change `vic2/screen.py` to match.
 - Keys in the demo and space in the viewer are read from the CIA matrix, so VICE
   `-keybuf` cannot press them (it only feeds the KERNAL buffer).
@@ -262,7 +280,9 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 - Fastloader / IRQ-safe loader for the viewer and diskshow (the KERNAL load is slow and
   cannot run while a kernel is displaying; with one, diskshow could load the next image
   while showing the current one).
-- C64-side word wrap for plain text files; custom fonts from a PNG; fonts loaded at run
+- C64-side word wrap for `.txt`/`.v2t` drawing (`asm/stream.s` has one for its stream);
+  scrollback in the stream demo (it scrolls down only and drops lines above the screen);
+  a real stream source (RS-232 or disk, buffered by an IRQ); custom fonts from a PNG; fonts loaded at run
   time (the `.txt` could name one; the drawer would read the record through a pointer
   instead of the assembled labels); mega fonts.
 - Text scrolling below a still image (raster split): `v2i_hook` (cycle exact, right
