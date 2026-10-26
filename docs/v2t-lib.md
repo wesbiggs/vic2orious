@@ -1,8 +1,8 @@
 # v2t.inc: proportional text on a hires bitmap
 
 `asm/v2t.inc` draws [.v2t text files](v2t-format.md) and single lines of text into a
-hires bitmap, with the proportional font from `font.inc` (a GEOS font record, see
-[v2t-format.md](v2t-format.md#the-font)). It is ca65 source:
+hires bitmap, with the proportional font from `font.inc` (made from a GEOS font or the character ROM,
+see [v2t-format.md](v2t-format.md#the-font)). It is ca65 source:
 
 ```
         .include "v2t.inc"              ; needs font.inc (written by python3 -m vic2.build)
@@ -17,10 +17,11 @@ has already happened.
 |---|---|---|
 | `V2T_BITMAP` | `$e000` | 8000-byte bitmap (v2i's) |
 | `V2T_SCREEN` | `$c000` | 1000 cell colours (v2i's screen) |
-| `V2T_ZP` | `$1d` | `V2T_ZP_SIZE` = 10 zero page bytes (just after v2i's default block) |
+| `V2T_ZP` | `$1d` | `V2T_ZP_SIZE` = 13 zero page bytes (just after v2i's default block) |
 
 Glyphs are OR'd into the bitmap, so the CPU must read the bitmap back as RAM: if it sits
-under a ROM, bank that ROM out. `asm/v2t-demo.s` keeps the KERNAL running and puts the
+under a ROM, bank that ROM out. The glyph drawer patches its own code (a jump for the
+shift), so the library must run from RAM. `asm/v2t-demo.s` keeps the KERNAL running and puts the
 bitmap in VIC bank 1 (`$6000`, colours at `$4400`).
 
 ## Routines

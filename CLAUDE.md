@@ -140,16 +140,19 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   `recover` then lets sprites paint leftover pixels they already reach without writes.
   Remaining pixels fall back to the nearer of the cell's two colours.
 - Text: the build word-wraps by pixel width and ships finished lines (ASCII codes); the
-  C64 only draws glyphs and colours each row's cells. The C64 does not wrap. The font is a
-  GEOS record assembled into the program (`font.inc`): `v2t_tglyphs` takes 8 bitstream
-  bits at a time from the glyph's bit offset, masks the last ones and shift + ORs them
-  into the bitmap, row by row (+1, or +313 at a cell's bottom). Lines are H + leading
-  pixels apart (H = font height, stored in `.txt` byte 8 and checked by `v2t_draw`;
-  `build --leading`, default 2), so a line touches every char row its H lines reach, and
-  all of them get the line's colour (the later line wins a shared row). The text layout
-  depends on the font; it is packed on every build, outside the conversion cache. The ask
-  demo puts each menu line on a char row boundary (`ASK_MENU_LEAD`) and skips itself
-  (`NoRoom`) when a big font leaves no room for answers.
+  C64 only draws glyphs and colours each row's cells. The C64 does not wrap. The font
+  (a GEOS record, or the ROM's) is assembled into the program as byte columns
+  (`font.inc`, `Font.asm`): `v2t_tglyphs` draws a glyph one 8-pixel column at a time,
+  top to bottom, Y = pixel line in the char row for both font (src = column - tyo) and
+  bitmap; each byte is shifted by x & 7 (self-modified jump into an unrolled shift: 1-4
+  right, 5-7 as 3-1 left) and ORed into two bitmap bytes (pp, pp2 = pp + 8; +320 at a
+  char row's bottom). The OR is needed: neighbouring glyphs share bitmap bytes. Lines
+  are H + leading pixels apart (H = font height, stored in `.txt` byte 8 and checked by
+  `v2t_draw`; `build --leading`, default 2), so a line touches every char row its H lines
+  reach, and all of them get the line's colour (the later line wins a shared row). The
+  text layout depends on the font; it is packed on every build, outside the conversion
+  cache. The ask demo puts each menu line on a char row boundary (`ASK_MENU_LEAD`) and
+  skips itself (`NoRoom`) when a big font leaves no room for answers.
 
 ## Working in the repo
 
@@ -222,8 +225,13 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   24), random restarts in the cell search (too slow for little gain).
 - Text: fixed 8x8 ROM glyphs first, then the proportional ROM font (about 20% more text per
   line; letters average 6.8 px because of the 2 px strokes), first as 8 bytes per glyph
-  indexed by screen code, now as a GEOS record (same pixels: `--verify` and the models
+  indexed by screen code, then as a GEOS record (same pixels: `--verify` and the models
   matched before and after the switch).
+- Text speed (Oct 2026): drawing from the GEOS bitstream (align 8 bits from the glyph's bit
+  offset, mask, shift loop) cost ~235 cycles per glyph row byte; byte columns with an
+  unrolled shift made a story 2.7x (ROM font) to 3.2x (NLQ 24) faster, same pixels, font
+  data 15-30% bigger. Measured with py65 (cycle counts of `v2t_draw`). Most of what is
+  left is the per-byte loop; `v2t_rowaddr`'s multiply loop is next (~8%).
 - NTSC sprite DMA from Bauer's vic-ii.txt alone: its 6567R8 diagram is abbreviated and
   reads as sprites 0-2 at 60/62/64 with 3-7 unchanged; that gave ~2300 wrong pixels in
   VICE, and guessed shifts did not converge. VICE's cycle tables (above) gave 0.
