@@ -4,7 +4,8 @@ Converts C64-palette PNGs into C64 hires bitmap + per-line multiplexed hires spr
 for pixel-perfect output, and plays the results on a real (emulated) C64: a slideshow PRG
 with the images embedded, a disk slideshow (`diskshow`) that loads every image in turn, a
 viewer PRG that loads `.v2i` image files (plus optional `.txt` narrative files drawn
-beside the picture) from disk by name, and an interactive `ask` demo.
+beside the picture) from disk by name, an interactive `ask` demo, and a smooth scroll
+demo for text.
 The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.inc`
 (text), that other programs can include. Apache-2.0 licensed (`LICENSE`).
 
@@ -38,8 +39,8 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   single lines, measure, clear; bitmap/screen addresses configurable, no VIC setup).
   Each stands alone (own zero page block, own row address helper, prefixed names).
   `asm/slideshow.s`, `asm/diskshow.s`, `asm/viewer.s` and `asm/ask.s` use both;
-  `asm/v2i-demo.s` and
-  `asm/v2t-demo.s` (KERNAL on, bitmap in bank 1) use one each.
+  `asm/v2i-demo.s`,
+  `asm/v2t-demo.s` (KERNAL on, bitmap in bank 1) and `asm/scroll.s` use one.
 - `docs/`: `v2i-format.md`, `v2t-format.md` (incl. the font), `v2i-lib.md`, `v2t-lib.md`.
   Keep them in sync with the code.
 - `tools/png2c64.py`: the user's quick quantiser (picture -> Pepto palette). `-o FILE` or
@@ -153,6 +154,18 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   text layout depends on the font; it is packed on every build, outside the conversion
   cache. The ask demo puts each menu line on a char row boundary (`ASK_MENU_LEAD`) and
   skips itself (`NoRoom`) when a big font leaves no room for answers.
+- Scroll demo (`asm/scroll.s`, `build_scroll`/`scroll.inc`): a page of the intro and all
+  stories (up to 255 lines, cut to fit below `$4000`), 24-row mode, YSCROLL 0-7, two
+  bitmaps (A: `$6000`/`$4000` in bank 1, B: `$a000`/`$8000` in bank 2, BASIC banked out),
+  swapped by the raster IRQ (line 250) only when the back's tag (`btag`) is the base it
+  needs; otherwise the scroll waits. The main loop prepares the back: row colours from
+  `scr_rc` (only rows that change), 7680 bytes copied (~74k cycles, the fixed cost), the
+  new row cleared and its lines drawn with `v2t_over` into a bitmap `VOFF` = 4 rows early,
+  clipped to that row (`v2t_rtop`/`v2t_rbot`), so lines may start above row 0 (fonts up
+  to 32 px). At one pixel per frame it has 8 frames: worst step ~124k cycles (ROM font)
+  against ~126k on NTSC, ~148k on PAL; anything that makes text drawing slower can make
+  it hitch on NTSC, which `--verify`'s timing check (`AUTO=2`: N frames down must end
+  at line N) catches.
 
 ## Working in the repo
 
@@ -179,7 +192,9 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   whole screen with a model (`expected_screen`: converter output + `Screen` text model).
   For each `.ask` it builds `ask.s` with `AUTO=n` (picks the last topic, then keeps
   drawing a black-on-black line) and compares with `Ask.model`; the v2i demo against the
-  first image and the v2t demo against `v2t_demo_screen`. If text rendering
+  first image and the v2t demo against `v2t_demo_screen`; the scroll demo scrolls itself
+  (`AUTO=1`: down, then back up; `AUTO=2`: the timing check) and is compared with
+  `scroll_screen`. If text rendering
   changes, change `vic2/screen.py` to match.
 - Keys in the demo and space in the viewer are read from the CIA matrix, so VICE
   `-keybuf` cannot press them (it only feeds the KERNAL buffer).
@@ -250,3 +265,15 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 - C64-side word wrap for plain text files; custom fonts from a PNG; fonts loaded at run
   time (the `.txt` could name one; the drawer would read the record through a pointer
   instead of the assembled labels); mega fonts.
+- Text scrolling below a still image (raster split): `v2i_hook` (cycle exact, right
+  after the kernel) switches `$dd00` to the text bitmap's bank and YSCROLL to the text's
+  s; bank 3 and YSCROLL 3 must be back before line `$30`, which needs a second raster
+  IRQ for the host in v2i (the IRQ prologue can't change without moving the kernels'
+  entry window). The blank margin row under the image hides the seam (idle lines are
+  black in hires; a repeated row is blank), but which memory row shows first depends on
+  s: check in VICE. CPU is the limit: the host only gets the lines below the image
+  (~9k cycles a frame on PAL under a 120-line image) for the copy (~3k per text row) and
+  the new row (30-50k at full width), so keep the area narrow or scroll every other
+  frame. Text above the image would need the kernel to do the switches (converter);
+  text beside it can't use YSCROLL at all (software shifting is ~38k cycles a frame for
+  a 19-cell column).

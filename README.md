@@ -126,6 +126,10 @@ red). Outputs, in `build/pal/` (or `build/ntsc/`):
 - `ask-<name>.prg`: the ask demo for every image with an `.ask` file.
 - `v2i-demo.prg`, `v2t-demo.prg`: the smallest programs using just one of the two
   libraries (an image; text without an image).
+- `scroll-demo.prg`: every story on one tall page of text that scrolls smoothly, one
+  pixel per frame (cursor down, cursor up or a joystick in port 2; space returns to
+  BASIC). It uses the VIC's fine scroll and two bitmaps taking turns: v2t draws only the
+  char row that scrolls in. Pages are up to 255 lines, as many as fit in memory.
 - `vic2orious.d64`: disk with `viewer`, `diskshow`, `slideshow`, the demos, and every
   image and story as separate files. When they do not fit on a 1541 disk (about 13
   images) it is `vic2orious.d81` (1581, about 60 images) instead.
@@ -140,6 +144,7 @@ make run-viewer IMAGE=princess        # the disk viewer, with the image name typ
 make run-ask ASK=princess             # the ask demo
 make run-v2i                          # image only
 make run-v2t                          # text only
+make run-scroll                       # smooth scrolling text
 make run-d64                          # boot the disk (.d64 or .d81; starts the viewer)
 ```
 

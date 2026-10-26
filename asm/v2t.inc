@@ -8,15 +8,17 @@
 ;                  (or made for a font of another height)
 ;   v2t_draw_at    A/Y = .v2t: draw it at pixel v2t_x, v2t_y, leading v2t_lead
 ;   v2t_line       A/Y = 0-terminated text: clear the H pixel lines at v2t_x, v2t_y over
-;                  v2t_cols cells, colour them v2t_color, draw the text clipped to them;
-;                  then v2t_y += H + v2t_lead. C=1: clipped
+;                  v2t_cols cells (not if v2t_over is non-zero), colour them v2t_color,
+;                  draw the text clipped to them; then v2t_y += H + v2t_lead. C=1: clipped
 ;   v2t_measure    A/Y = 0-terminated text: width in pixels in A (low), X (high)
 ;   v2t_clear      A = colour: clear v2t_cols x v2t_rows cells from v2t_col, v2t_row
 ;   v2t_paint      A = colour: colour the same cells, leaving the bitmap as it is
 ;
-; The bitmap (V2T_BITMAP, 8000 bytes) and screen (V2T_SCREEN, the cell colours) default to
-; $e000 and $c000, where v2i.inc puts them; define them before the include to draw
-; elsewhere. Glyphs are OR'd in, so the bitmap must read back as RAM (bank out a ROM above
+; The bitmap (8000 bytes) and screen (the cell colours) are at v2t_bitmap and v2t_screen,
+; $e000 and $c000 by default (where v2i.inc puts them; define V2T_BITMAP and V2T_SCREEN
+; before the include for other defaults, or change the variables at run time). Everything
+; is drawn only in char rows v2t_rtop to v2t_rbot - 1 (default 0-24; rows up to 31 can be
+; addressed, so a bitmap address 1-7 rows early lets lines start above row 0). Glyphs are OR'd in, so the bitmap must read back as RAM (bank out a ROM above
 ; it). The program sets up the VIC (hires bitmap mode, bank, $d018). Colours are cell
 ; colours, fg << 4 | bg. Zero page: V2T_ZP_SIZE bytes from V2T_ZP (default $1d).
 
@@ -111,11 +113,8 @@ v2t_draw_go:
         jsr v2t_tnext
         lda v2t_tn
         beq @eol                        ; empty line: nothing to colour or draw
-        lda v2t_trow
-        cmp #25
-        bcs :+
         jsr v2t_tcolrows
-:       jsr v2t_tglyphs
+        jsr v2t_tglyphs
 @eol:   jsr v2t_tdown
         dec v2t_tleft
         bne @line
@@ -147,12 +146,11 @@ v2t_line:
         lda v2t_color
         sta v2t_tclr
         jsr v2t_tpos
-        lda v2t_trow
-        cmp #25
-        bcs :+
+        lda v2t_over
+        bne :+
         jsr v2t_tclrrows
-        jsr v2t_tcolrows
-:       jsr v2t_tglyphs
+:       jsr v2t_tcolrows
+        jsr v2t_tglyphs
         php
         lda v2t_y                       ; next line
         clc
@@ -213,15 +211,17 @@ v2t_tarea:
         sta v2t_tleft
         beq @done
 @row:   lda v2t_trow
-        cmp #25
+        cmp v2t_rbot
         bcs @done
+        cmp v2t_rtop
+        bcc @next
         tax
         lda v2t_ce
         beq :+
         jsr v2t_tzero
 :       ldx v2t_trow
         jsr v2t_tcolour
-        inc v2t_trow
+@next:  inc v2t_trow
         dec v2t_tleft
         bne @row
 @done:  rts
@@ -284,7 +284,7 @@ v2t_tdown:                              ; next line H + tlead pixel lines down
 :       sta v2t_tyo
         rts
 
-v2t_tclrrows:                           ; clear the H pixel lines from trow + tyo (trow < 25)
+v2t_tclrrows:                           ; clear the H pixel lines from trow + tyo
         lda v2t_tyo
         sta v2t_cs
         clc
@@ -292,14 +292,19 @@ v2t_tclrrows:                           ; clear the H pixel lines from trow + ty
         sta v2t_tln                     ; lines left, counted from the top of the row
         lda v2t_trow
         sta v2t_trc
-@row:   lda v2t_tln
+@row:   lda v2t_trc
+        cmp v2t_rbot
+        bcs @done
+        lda v2t_tln
         cmp #8
         bcc :+
         lda #8
 :       sta v2t_ce
         ldx v2t_trc
+        cpx v2t_rtop
+        bcc :+
         jsr v2t_tzero
-        lda #0
+:       lda #0
         sta v2t_cs
         lda v2t_tln
         cmp #9
@@ -307,12 +312,10 @@ v2t_tclrrows:                           ; clear the H pixel lines from trow + ty
         sbc #8
         sta v2t_tln
         inc v2t_trc
-        lda v2t_trc
-        cmp #25
-        bcc @row
+        bne @row
 @done:  rts
 
-v2t_tcolrows:                           ; colour the rows the line touches (trow < 25)
+v2t_tcolrows:                           ; colour the rows the line touches
         lda v2t_tyo
         clc
         adc #V2T_FONT_H
@@ -320,46 +323,37 @@ v2t_tcolrows:                           ; colour the rows the line touches (trow
         lda v2t_trow
         sta v2t_trc
 @row:   ldx v2t_trc
+        cpx v2t_rbot
+        bcs @done
+        cpx v2t_rtop
+        bcc :+
         jsr v2t_tcolour
-        lda v2t_tln
+:       lda v2t_tln
         cmp #9
         bcc @done
         sbc #8
         sta v2t_tln
         inc v2t_trc
-        lda v2t_trc
-        cmp #25
-        bcc @row
+        bne @row
 @done:  rts
 
-; dst = V2T_BITMAP + X * 320, scr = V2T_SCREEN + X * 40 (bitmap and screen of char row X)
+; dst = v2t_bitmap + X * 320, scr = v2t_screen + X * 40 (bitmap and screen of char row X)
 v2t_rowaddr:
-        lda #<V2T_BITMAP
+        clc
+        lda v2t_bitmap
+        adc v2t_r320lo,x
         sta v2t_dst
-        lda #>V2T_BITMAP
-        sta v2t_dst+1
-        lda #<V2T_SCREEN
-        sta v2t_scr
-        lda #>V2T_SCREEN
-        sta v2t_scr+1
-        cpx #0
-        beq @done
-@mul:   clc
-        lda v2t_dst
-        adc #<320
-        sta v2t_dst
-        lda v2t_dst+1
-        adc #>320
+        lda v2t_bitmap+1
+        adc v2t_r320hi,x
         sta v2t_dst+1
         clc
-        lda v2t_scr
-        adc #40
+        lda v2t_screen
+        adc v2t_r40lo,x
         sta v2t_scr
-        bcc :+
-        inc v2t_scr+1
-:       dex
-        bne @mul
-@done:  rts
+        lda v2t_screen+1
+        adc v2t_r40hi,x
+        sta v2t_scr+1
+        rts
 
 v2t_tcell:                              ; dst/scr = cell tcol of char row X
         jsr v2t_rowaddr
@@ -386,6 +380,27 @@ v2t_tzero:                              ; bitmap bytes cs..ce-1 of twid cells of
         jsr v2t_tcell
         ldx v2t_twid
         beq @done
+        lda v2t_cs
+        bne @cell
+        lda v2t_ce
+        cmp #8
+        bne @cell
+@full:  lda #0                          ; whole cells, unrolled
+        ldy #7
+        .repeat 7
+        sta (v2t_dst),y
+        dey
+        .endrep
+        sta (v2t_dst),y
+        lda v2t_dst
+        clc
+        adc #8
+        sta v2t_dst
+        bcc :+
+        inc v2t_dst+1
+:       dex
+        bne @full
+        rts
 @cell:  lda #0
         ldy v2t_cs
 @b:     sta (v2t_dst),y
@@ -414,7 +429,7 @@ v2t_tcolour:                            ; twid cells of row X = colour tclr
 
 ; draw tn glyphs from (ptr) at pixel x = tx, row trow + tyo, OR'd into the bitmap; ptr
 ; ends after them. A glyph that does not end left of xlim and all after it are skipped
-; (C=1). Glyph rows below the screen are not drawn. A glyph is drawn one byte column
+; (C=1). Glyph rows outside char rows rtop..rbot-1 are not drawn. A glyph is drawn one byte column
 ; (8 pixels wide, font.inc) at a time, top to bottom: Y is the pixel line in the char row,
 ; for the bitmap and (src = column - first line) the font. Each byte is shifted right by
 ; x & 7 into two bitmap bytes, pp and pp2 = pp + 8, through the entry for that shift
@@ -426,37 +441,82 @@ v2t_tglyphs:
         sta v2t_xlo
         lda v2t_tx+1
         sta v2t_xhi
-        lda v2t_trow
-        cmp #25
-        bcc :+
-        lda #$80                        ; off screen: skip all
-        sta v2t_tclip
-        bne @go
-:       tax                             ; dst = bitmap row trow
+        sec                             ; xrem = xlim - x
+        lda v2t_xlim
+        sbc v2t_tx
+        sta v2t_xrem
+        lda v2t_xlim+1
+        sbc v2t_tx+1
+        sta v2t_xrem+1
+        lda v2t_trow                    ; first char row in the clip window: tr0, from
+        sta v2t_tr0                     ; line ty0 of it, glyph rows left trl0, the
+        cmp v2t_rtop                    ; column's byte for line 0 of it at + tsoff
+        bcs @vis
+        lda v2t_rtop                    ; above the window: skip 8 * (rtop - trow) - tyo
+        sta v2t_tr0                     ; glyph rows
+        sec
+        sbc v2t_trow
+        asl
+        asl
+        asl
+        sec
+        sbc v2t_tyo
+        sta v2t_tsoff
+        lda #V2T_FONT_H
+        sec
+        sbc v2t_tsoff
+        bcc @off                        ; the line ends above it
+        beq @off
+        sta v2t_trl0
+        lda #0
+        sta v2t_ty0
+        sta v2t_tsoff+1
+        beq @row
+@vis:   lda #V2T_FONT_H
+        sta v2t_trl0
+        lda v2t_tyo
+        sta v2t_ty0
+        lda #0
+        sec
+        sbc v2t_tyo
+        sta v2t_tsoff
+        lda #0
+        sbc #0
+        sta v2t_tsoff+1
+@row:   lda v2t_tr0
+        cmp v2t_rbot
+        bcs @off
+        tax                             ; dst = bitmap row tr0
         jsr v2t_rowaddr
+        jmp @go
+@off:   lda #$80                        ; outside the clip window: skip all
+        sta v2t_tclip
 @go:    lda v2t_tn
         bne @chr
         jmp @end
 @chr:   ldy #0
         lda (v2t_ptr),y                 ; character code
-        jsr v2t_tnext
-        bit v2t_tclip
+        inc v2t_ptr
+        bne :+
+        inc v2t_ptr+1
+:       bit v2t_tclip
         bpl :+
         jmp @skip
-:       jsr v2t_tglyph
-        lda v2t_tw                      ; clip: draw only if x + width <= xlim
-        clc
-        adc v2t_xlo
-        sta v2t_tend
-        lda v2t_xhi
-        adc #0
-        sta v2t_tend+1
-        lda v2t_xlim
-        cmp v2t_tend
-        lda v2t_xlim+1
-        sbc v2t_tend+1
+:       and #$7f                        ; X = glyph, tw = width (as v2t_tglyph)
+        sec
+        sbc #32
         bcs :+
-        lda #$80
+        lda #0
+:       tax
+        lda v2t_font_w,x
+        sta v2t_tw
+        ldy v2t_xrem+1                  ; clip: draw only if width <= xlim - x
+        bmi @clip
+        bne :+
+        cmp v2t_xrem
+        beq :+
+        bcc :+
+@clip:  lda #$80
         sta v2t_tclip
         jmp @skip
 :       lda v2t_font_nb,x               ; byte columns with ink
@@ -482,12 +542,12 @@ v2t_tglyphs:
         lda v2t_xhi
         adc v2t_dst+1
         sta v2t_tp+1
-@col:   sec                             ; src = column - tyo, pp = tp, pp2 = tp + 8
+@col:   clc                             ; src = column + tsoff, pp = tp, pp2 = tp + 8
         lda v2t_tg
-        sbc v2t_tyo
+        adc v2t_tsoff
         sta v2t_src
         lda v2t_tg+1
-        sbc #0
+        adc v2t_tsoff+1
         sta v2t_src+1
         lda v2t_tp
         sta v2t_pp
@@ -498,11 +558,11 @@ v2t_tglyphs:
         sta v2t_pp+1
         adc #0
         sta v2t_pp2+1
-        lda #V2T_FONT_H
+        lda v2t_trl0
         sta v2t_trl
-        lda v2t_trow
+        lda v2t_tr0
         sta v2t_trc
-        ldy v2t_tyo
+        ldy v2t_ty0
 @seg:   tya                             ; lines y..tye-1 of this char row
         clc
         adc v2t_trl
@@ -542,8 +602,8 @@ v2t_tglyphs:
         beq @ncol
         inc v2t_trc                     ; next char row: src + 8, pp/pp2 + 320
         lda v2t_trc
-        cmp #25
-        bcs @ncol                       ; below the screen
+        cmp v2t_rbot
+        bcs @ncol                       ; below the clip window
         clc
         lda v2t_src
         adc #8
@@ -593,12 +653,18 @@ v2t_tglyphs:
         ora (v2t_pp),y
         sta (v2t_pp),y
         jmp @nb
-@adv:   clc                             ; x += width
+@adv:   clc                             ; x += width, xrem -= width
         lda v2t_xlo
         adc v2t_tw
         sta v2t_xlo
-        bcc @skip
+        bcc :+
         inc v2t_xhi
+:       sec
+        lda v2t_xrem
+        sbc v2t_tw
+        sta v2t_xrem
+        bcs @skip
+        dec v2t_xrem+1
 @skip:  dec v2t_tn
         beq @end
         jmp @chr
@@ -628,6 +694,18 @@ v2t_tnext:
 ; ---- data and state
 
 v2t_magic: .byte "V2T", 4
+v2t_r320lo: .repeat 32, I               ; char row offsets in bitmap and screen
+        .byte <(I * 320)
+        .endrep
+v2t_r320hi: .repeat 32, I
+        .byte >(I * 320)
+        .endrep
+v2t_r40lo: .repeat 32, I
+        .byte <(I * 40)
+        .endrep
+v2t_r40hi: .repeat 32, I
+        .byte >(I * 40)
+        .endrep
 
 ; parameters
 v2t_x:     .word 0                      ; text pixel position
@@ -638,6 +716,11 @@ v2t_col:   .byte 0                      ; v2t_clear: cells
 v2t_row:   .byte 0
 v2t_cols:  .byte 40                     ; v2t_line, v2t_clear: width in cells
 v2t_rows:  .byte 1
+v2t_over:  .byte 0                      ; v2t_line: 0 clears its pixel lines first, else ORs
+v2t_bitmap: .word V2T_BITMAP            ; bitmap and screen drawn into
+v2t_screen: .word V2T_SCREEN
+v2t_rtop:  .byte 0                      ; clip window: char rows rtop..rbot-1 (rbot <= 32)
+v2t_rbot:  .byte 25
 
 ; internal
 v2t_tx:    .word 0
@@ -657,11 +740,16 @@ v2t_tg:    .word 0                      ; the glyph's byte column
 v2t_tp:    .word 0                      ; its bitmap byte in the top char row
 v2t_tye:   .byte 0                      ; end of the lines drawn in this char row
 v2t_trl:   .byte 0                      ; glyph rows left after this char row
+v2t_tr0:   .byte 0                      ; first char row drawn, its first line,
+v2t_ty0:   .byte 0                      ; the glyph rows from there, the offset of
+v2t_trl0:  .byte 0                      ; their bytes in a column
+v2t_tsoff: .word 0
 v2t_tln:   .byte 0                      ; lines left (tclrrows, tcolrows)
 v2t_trc:   .byte 0
 v2t_xlo:   .byte 0
 v2t_xhi:   .byte 0
 v2t_xlim:  .word 0
+v2t_xrem:  .word 0                      ; xlim - x (signed)
 v2t_tend:  .word 0
 v2t_cs:    .byte 0
 v2t_ce:    .byte 0

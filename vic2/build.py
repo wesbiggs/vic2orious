@@ -537,6 +537,105 @@ def v2t_demo_screen(txt):
     return scr
 
 
+SCROLL_X, SCROLL_COLS = 8, 38  # SCR_X, SCR_COLS in scroll.inc
+SCROLL_TOP = 8                # page line of the first text line
+SCROLL_VOFF = 4               # VOFF in asm/scroll.s: lines may start 32 pixels above a row
+SCROLL_END = 0x4000           # asm/scroll.s must end below bitmap A's screen
+SCROLL_INTRO = """# v2t scroll demo
+
+Cursor down scrolls down, cursor up (shift + cursor down) scrolls up, one pixel per frame;
+a joystick in port 2 works too. Space returns to BASIC.
+
+The VIC's fine scroll moves the bitmap up to 7 pixels. Two bitmaps in two VIC banks take
+turns: while one is shown, the main loop prepares the other one char row further, copying
+24 rows from the shown one and drawing the new row with v2t_line, clipped to that row. At
+the row boundary the raster IRQ switches banks and resets the fine scroll."""
+
+
+def scroll_page(images, leading):
+    """The scroll demo's page: the intro, then every image's story. [(colour, text, page y)]
+    of the non-empty lines, and the page height."""
+    font = fonts.current()
+    texts = [SCROLL_INTRO]
+    for p in images:
+        t = os.path.splitext(p)[0] + ".txt"
+        if os.path.exists(t):
+            with open(t) as f:
+                texts.append(f.read())
+    rows = []
+    for t in texts:
+        if rows:
+            rows.append((TEXT_BODY, ""))
+        rows += text_layout(t, font, SCROLL_COLS * 8, 1 << 30, leading)[0]
+    pitch = font.height + leading
+    lines = [(c, l, SCROLL_TOP + i * pitch) for i, (c, l) in enumerate(rows) if l]
+    return lines, SCROLL_TOP + len(rows) * pitch - leading + 8
+
+
+def write_scroll_inc(lines, height):
+    font = fonts.current()
+    vmax = max(0, height - 192)
+    nrows = vmax // 8 + 27                # rows a buffer can show: base <= vmax + 8, 25 rows
+    first, cnt, colour = [], [], []
+    for j in range(nrows):
+        hit = [i for i, (_, _, y) in enumerate(lines) if y < 8 * j + 8 and y + font.height > 8 * j]
+        first.append(hit[0] if hit else 0)
+        cnt.append(len(hit))
+        colour.append(lines[hit[-1]][0] if hit else TEXT_BODY)    # the last line wins
+
+    def table(label, values):
+        out.append(label + ":")
+        for i in range(0, len(values), 16):
+            out.append("        .byte " + ",".join(values[i:i + 16]))
+
+    out = ["SCR_N = %d" % len(lines), "SCR_VMAX = %d" % vmax, "SCR_X = %d" % SCROLL_X, "SCR_COLS = %d" % SCROLL_COLS, "        .data"]
+    n = range(len(lines))
+    table("scr_tlo", ["<scr_t%d" % i for i in n])
+    table("scr_thi", [">scr_t%d" % i for i in n])
+    table("scr_clr", ["$%02x" % lines[i][0] for i in n])
+    table("scr_ylo", ["%d" % (lines[i][2] & 0xFF) for i in n])
+    table("scr_first", ["%d" % v for v in first])
+    table("scr_cnt", ["%d" % v for v in cnt])
+    table("scr_rc", ["$%02x" % v for v in colour])
+    for i, (_, text, _) in enumerate(lines):
+        out.append("scr_t%d: .byte %s,0" % (i, ",".join("%d" % c for c in fonts.codes(text))))
+    with open(os.path.join(BUILD, "scroll.inc"), "w") as f:
+        f.write("\n".join(out) + "\n")
+    return vmax
+
+
+def build_scroll(images, leading, out, defines=(), log=print):
+    """Assemble asm/scroll.s with as much of the page as fits below SCROLL_END (and at most
+    255 lines). Returns (lines, page height, vmax)."""
+    font = fonts.current()
+    if font.height > 8 * SCROLL_VOFF:
+        raise SystemExit("scroll demo: fonts up to %d pixels high" % (8 * SCROLL_VOFF))
+    lines, height = scroll_page(images, leading)
+    n = min(len(lines), 255)
+    while True:
+        part = lines[:n]
+        h = height if n == len(lines) else part[-1][2] + font.height + 8
+        vmax = write_scroll_inc(part, h)
+        assemble(out, "scroll.s", defines=defines)
+        if 0x0801 + os.path.getsize(out) - 2 <= SCROLL_END:
+            break
+        n = n * 9 // 10
+    if n < len(lines):
+        log("  scroll demo: the first %d of %d lines fit" % (n, len(lines)))
+    return part, h, vmax
+
+
+def scroll_screen(lines, height, v):
+    """What asm/scroll.s shows at page line v: lines v..v+191 (24-row mode)."""
+    font = fonts.current()
+    rows = (max(height, v + 192) + 7) // 8
+    scr = Screen(rows)
+    scr.clear(0, 0, 40, rows, TEXT_BODY)
+    for c, text, y in lines:
+        scr.text_line(font, SCROLL_X, y, SCROLL_COLS, c, fonts.codes(text))
+    return scr.pixels(v, 192)
+
+
 def check_in_vice(prg, png, exp, label, retry=True):
     """Screenshot prg in VICE and compare with exp. A failed check runs once more: VICE's
     autostart now and then leaves the machine at the READY prompt (the kernels are
@@ -597,6 +696,9 @@ def build_system(a, images, at, standard):
     write_v2t_demo_inc(story)
     assemble(v2t_demo, "v2t-demo.s")
     demos.append((v2t_demo, "v2t demo"))
+    scroll = os.path.join(BUILD, "scroll-demo.prg")
+    build_scroll(images, a.leading, scroll)
+    demos.append((scroll, "scroll demo"))
     asks = []
     for img_path, inf in zip(images, infos):
         path = os.path.splitext(img_path)[0] + ".ask"
@@ -647,6 +749,20 @@ def build_system(a, images, at, standard):
                             expected_screen(infos[0], text=False).pixels(), "v2i demo")
         ok &= check_in_vice(v2t_demo, os.path.join(BUILD, "vice_v2t_demo.png"),
                             v2t_demo_screen(story).pixels(), "v2t demo")
+        # scroll demo: down to v1, back up to v2 by itself
+        one = os.path.join(BUILD, "verify_scroll.prg")
+        lines, height, vmax = build_scroll(images, a.leading, one, log=lambda *x: None)
+        v1 = min(vmax, 150)
+        v2 = max(0, v1 - 37)
+        build_scroll(images, a.leading, one, ["AUTO=1", "AUTO_V1=%d" % v1, "AUTO_V2=%d" % v2],
+                     log=lambda *x: None)
+        ok &= check_in_vice(one, os.path.join(BUILD, "vice_scroll.png"),
+                            scroll_screen(lines, height, v2), "scroll demo (v = %d)" % v2)
+        # and one pixel per frame without waiting: N frames down end at line N
+        n = min(vmax, 300)
+        build_scroll(images, a.leading, one, ["AUTO=2", "AUTO_N=%d" % n], log=lambda *x: None)
+        ok &= check_in_vice(one, os.path.join(BUILD, "vice_scroll_timing.png"),
+                            scroll_screen(lines, height, n), "scroll demo (%d frames)" % n)
         # diskshow: the first image (and its text) from a disk of its own, shown until space
         inf = infos[0]
         write_diskshow_inc([inf], 0)

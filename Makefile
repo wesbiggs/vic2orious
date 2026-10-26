@@ -59,7 +59,7 @@ DRIVE    = $$(test -e $(B)/vic2orious.d81 && echo -drive8type 1581) \
            $(if $(strip $(FAST)),+drive8truedrive -trapdevice8)
 
 .PHONY: all build convert verify run run-slideshow run-diskshow run-viewer run-ask run-v2i \
-        run-v2t run-d64 clean help FORCE
+        run-v2t run-scroll run-d64 clean help FORCE
 
 all: build
 
@@ -114,6 +114,9 @@ run-v2i: build
 run-v2t: build
 	$(VICE) -autostartprgmode 1 $(SYS)/v2t-demo.prg
 
+run-scroll: build
+	$(VICE) -autostartprgmode 1 $(SYS)/scroll-demo.prg
+
 run-d64: build
 	$(VICE) $(DRIVE) -autostart $(DISKIMG)
 
@@ -131,6 +134,8 @@ help:
 	@echo "make run-ask        run the ask demo (ASK=princess)"
 	@echo "make run-v2i        run the v2i-only demo (one image, space returns to BASIC)"
 	@echo "make run-v2t        run the v2t-only demo (text, KERNAL on, any key returns)"
+	@echo "make run-scroll     run the scroll demo (all stories on one page; cursor keys"
+	@echo "                    scroll it smoothly, space returns)"
 	@echo "make run-d64        boot the disk (.d64, or .d81 when the images need it)"
 	@echo "make clean          remove build/ (PAL, NTSC and dual builds)"
 	@echo "options: IMAGES='input/a.png ...' FRAME=1 AT=COLUMN,ROW LEADING=n AUTO=n HOLD=n DISK=d64|d81"

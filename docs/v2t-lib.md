@@ -15,8 +15,8 @@ has already happened.
 
 | define before the include | default | |
 |---|---|---|
-| `V2T_BITMAP` | `$e000` | 8000-byte bitmap (v2i's) |
-| `V2T_SCREEN` | `$c000` | 1000 cell colours (v2i's screen) |
+| `V2T_BITMAP` | `$e000` | 8000-byte bitmap (v2i's): the default of `v2t_bitmap` |
+| `V2T_SCREEN` | `$c000` | 1000 cell colours (v2i's screen): the default of `v2t_screen` |
 | `V2T_ZP` | `$1d` | `V2T_ZP_SIZE` = 13 zero page bytes (just after v2i's default block) |
 
 Glyphs are OR'd into the bitmap, so the CPU must read the bitmap back as RAM: if it sits
@@ -41,14 +41,27 @@ Colours are cell colours, `fg << 4 | bg`: `$f0` is light grey on black.
 | `v2t_paint` | A = colour | Colours the same cells as `v2t_clear` (cell colour A) and leaves the bitmap as it is: recolours text without drawing it again. |
 
 `v2t_draw` and `v2t_draw_at` OR into whatever is already there, so `v2t_clear` the area
-before drawing over old text. `v2t_line` clears its own H lines, and it colours all
-`v2t_cols` cells, so a background colour fills the line evenly to the right. Text below row 24, and glyphs past the right edge
-of the cells, are cut off.
+before drawing over old text. `v2t_line` clears its own H lines (unless `v2t_over` is
+set), and it colours all `v2t_cols` cells, so a background colour fills the line evenly
+to the right. Text outside the clip window (rows 0-24 unless `v2t_rtop`/`v2t_rbot` say
+otherwise), and glyphs past the right edge of the cells, are cut off.
 
 ## Parameters
 
 `v2t_x` (word), `v2t_y`, `v2t_lead` (default 2), `v2t_color` (default `$f0`), `v2t_col`,
-`v2t_row`, `v2t_cols` (default 40), `v2t_rows`.
+`v2t_row`, `v2t_cols` (default 40), `v2t_rows`, and:
+
+| variable | default | |
+|---|---|---|
+| `v2t_bitmap`, `v2t_screen` (words) | `V2T_BITMAP`, `V2T_SCREEN` | the bitmap and screen everything is drawn into; change them at run time to draw into another one (a back buffer) |
+| `v2t_rtop`, `v2t_rbot` | 0, 25 | clip window: all routines draw and colour only char rows `v2t_rtop` to `v2t_rbot - 1` |
+| `v2t_over` | 0 | non-zero: `v2t_line` doesn't clear its H lines, it ORs the glyphs into what is there |
+
+Rows are counted from `v2t_bitmap`, and up to row 31 can be addressed (`v2t_y` up to
+255). To draw a line that starts above the top of a bitmap, point `v2t_bitmap` and
+`v2t_screen` k rows early (`- k * 320`, `- k * 40`), add `8 * k` to `v2t_y` and set the
+clip window to rows k to k + 24 (or fewer): the rows before the bitmap are never
+written. `asm/scroll.s` draws single char rows of a taller page this way.
 
 Patterns: to centre a line, take `(320 - v2t_measure) / 2` as `v2t_x`. To right-align it,
 subtract the width from the right edge (`asm/v2t-demo.s` does both). For a column of
