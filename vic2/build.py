@@ -935,7 +935,8 @@ def build_system(a, images, at, standard):
 
 def build_dual(a, res):
     """build/dual/vic2orious.d81 (or .d64): the PAL and the NTSC images and programs, with
-    one diskshow and one viewer that pick the files that suit the machine."""
+    one diskshow and one viewer that pick the files that suit the machine, and one v2i demo
+    with both versions of the first image."""
     pal, ntsc = res["pal"], res["ntsc"]
     use_system("pal", dual=True)
     diskshow = os.path.join(BUILD, "diskshow.prg")
@@ -954,13 +955,16 @@ def build_dual(a, res):
     for std in ("pal", "ntsc"):
         for ask, out in res[std]["asks"]:
             files.append((out, "ask " + disk_name(ask.info["name"])[:10] + SUFFIX[std]))
-    for std in ("pal", "ntsc"):
-        for out, name in res[std]["demos"]:
-            if name == "v2i demo":          # the v2t demo has no kernel: one copy
-                files.append((out, name + SUFFIX[std]))
+    v2i_demo = os.path.join(BUILD, "v2i-demo.prg")
+    with open(os.path.join(BUILD, "v2idemo.inc"), "w") as f:
+        f.write('        .data\ndemo_img: .incbin "%s", 2\ndemo_img_n: .incbin "%s", 2\n'
+                % (pal["infos"][0]["v2i"], ntsc["infos"][0]["v2i"]))
+    assemble(v2i_demo, "v2i-demo.s", frame=a.frame, defines=["DUAL=1"])
+    files.append((v2i_demo, "v2i demo"))
     files += [d for d in pal["demos"] if d[1] != "v2i demo"]
     disk = make_disk(files, a.disk)
-    print("built %s and %s for both PAL and NTSC, and %s" % (diskshow, viewer, disk))
+    print("built %s, %s and %s for both PAL and NTSC, and %s" % (diskshow, viewer, v2i_demo,
+                                                                  disk))
     print("disk files: " + ", ".join(name.lower() for _, name in files))
     ok = True
     if a.verify:
@@ -982,6 +986,9 @@ def build_dual(a, res):
             else:
                 print("  %s: no screenshot" % label)
                 ok = False
+            ok &= check_in_vice(v2i_demo, os.path.join(BUILD, "vice_v2i_demo_%s.png" % std),
+                                expected_screen(inf, text=False).pixels(),
+                                "dual v2i demo on %s" % std.upper())
         timing.set_standard("pal")
     return ok, disk
 

@@ -127,7 +127,10 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   conversions, own disks), then `build_dual` writes `build/dual/` with diskshow and viewer
   assembled `DUAL=1`: they call `v2i_detect` (KERNAL on) and add `-P.V2I`/`-N.V2I` to the
   image names (base cut to 10 by `dual_base`); texts are shared (layout depends on the
-  position only). `--verify` with `--dual` also boots the dual diskshow on both systems.
+  position only). The v2i demo is assembled `DUAL=1` there too, with the first image's
+  PAL and NTSC `.v2i` both embedded (`demo_img`, `demo_img_n`), picked by `v2i_system`
+  after `v2i_init`; it replaces the `v2i demo-p`/`-n` pair on the dual disk. `--verify`
+  with `--dual` also boots the dual diskshow and runs the dual v2i demo on both systems.
   diskshow's hold time is `HOLD_SECS`, multiplied by 50 or 60 at startup.
 - Buffers: diskshow and the viewer load images at `$2800` (`PLAYER_BUF`; build asserts a
   `.v2i` fits below `$9800`) and texts at `$9800`. The programs may use up to `$27ff`:

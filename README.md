@@ -91,8 +91,9 @@ are two cycles longer.
 `build/dual/vic2orious.d81` (or `.d64` if it fits) with every image twice,
 `<name>-p.v2i` and `<name>-n.v2i` (names cut to 10 characters), the stories once, and a
 `diskshow` and `viewer` that detect the machine and load the matching files (in the
-viewer, type the name without the ending). The programs with images built in come in
-both versions: `slideshow-p`/`-n`, `v2i demo-p`/`-n`, `ask <name>-p`/`-n`. The run
+viewer, type the name without the ending). `v2i demo` holds both versions of its image
+and shows the one for the machine (`build/dual/v2i-demo.prg`). The other programs with
+images built in come in both versions: `slideshow-p`/`-n`, `ask <name>-p`/`-n`. The run
 targets use this disk with `DUAL=1`, in NTSC VICE when you add `NTSC=1`. 24 images take
 about 2,600 of the 3,160 blocks on a `.d81`.
 

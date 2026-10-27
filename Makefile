@@ -109,7 +109,7 @@ run-ask: build
 	$(VICE) -autostartprgmode 1 $(SYS)/ask-$(strip $(ASK)).prg
 
 run-v2i: build
-	$(VICE) -autostartprgmode 1 $(SYS)/v2i-demo.prg
+	$(VICE) -autostartprgmode 1 $(B)/v2i-demo.prg
 
 run-v2t: build
 	$(VICE) -autostartprgmode 1 $(SYS)/v2t-demo.prg

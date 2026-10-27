@@ -1,10 +1,15 @@
 ; v2i demo: the smallest complete v2i program. Shows one image (the first one built),
 ; framed when assembled with FRAME=1, and returns to BASIC when space is pressed.
+; Assembled with DUAL=1 it holds the image twice, made for PAL and for NTSC, and shows
+; the one that suits the machine.
 
-        .include "v2idemo.inc"          ; generated: demo_img
+        .include "v2idemo.inc"          ; generated: demo_img (DUAL: and demo_img_n, NTSC)
 
 .ifndef FRAME
 FRAME = 0
+.endif
+.ifndef DUAL
+DUAL = 0
 .endif
 
         .segment "LOADADDR"
@@ -18,6 +23,14 @@ FRAME = 0
 start:  jsr v2i_init
         lda #<demo_img
         ldy #>demo_img
+.if DUAL
+        ldx v2i_system                  ; set by v2i_init
+        cpx #V2I_NTSC
+        bne :+
+        lda #<demo_img_n
+        ldy #>demo_img_n
+:
+.endif
         jsr v2i_show
         bcs fail                        ; not for this machine (PAL/NTSC)
 .if FRAME
