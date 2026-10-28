@@ -33,7 +33,10 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   the ROM lower/upper case set, or one size of a GEOS `.cvt` font (`build --font`); the
   ASCII text codes and the pixel-width word wrap. `font.use()` selects the font for the
   whole process (like `timing.set_standard`), `font.current()` returns it.
-- `vic2/palette.py`: Pepto palette, nearest-colour loading.
+- `vic2/palette.py`: Pepto palette, and Colodore (`.vpl`, and as VICE renders it with
+  its default colour controls, PAL and NTSC: `COLODORE_VICE_*`, measured from a colour
+  bar PRG). `load_indexed` maps colours of all of them exactly (`KNOWN`), others to the
+  nearest Pepto (which gets VICE's bright Colodore wrong, e.g. red -> light red).
 - `asm/v2i.inc`: image library (`v2i_*`: machine takeover and exit, raster IRQ,
   unpacking into VIC bank 3, frame). `asm/v2t.inc`: text library (`v2t_*`: .v2t files,
   single lines, measure, clear; bitmap/screen addresses configurable, no VIC setup).
@@ -44,15 +47,22 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   one.
 - `docs/`: `v2i-format.md`, `v2t-format.md` (incl. the font), `v2i-lib.md`, `v2t-lib.md`.
   Keep them in sync with the code.
-- `tools/png2c64.py`: the user's quick quantiser (picture -> Pepto palette). `-o FILE` or
-  `-o DIR/` (keeps input names, takes several files / glob patterns), `-d
-  floydsteinberg|none` (default floydsteinberg). Refuses to overwrite its input. Its old
-  `-b` frame option was removed: framed pixels did not always convert exactly; frames come
-  from `v2i_frame` (`build -b`).
+- `tools/img2c64.py` (was `png2c64.py`): the user's quantiser (any picture -> PNG in
+  Colodore as VICE shows it by default, its PAL or NTSC rendering per file, tagged sRGB).
+  Converts the input's ICC profile to sRGB, EXIF orientation,
+  alpha onto black; `-a both|pal|ntsc|none` (default both) stretches the width by 1/PAR
+  (PAL 0.936, NTSC 0.75) and writes `-p`/`-n` files; then fits 320x200 and rounds to
+  multiples of 8. `-o FILE` or `-o DIR/` (keeps input names, takes several files / glob
+  patterns), `-d floydsteinberg|none`. Refuses to overwrite its input. `-b` only leaves
+  room for the frame `v2i_frame` draws (`build -b`): fits 304x184. (Its old `-b` drew the
+  frame into the pixels, which did not always convert exactly.)
 - `fonts/`: GEOS fonts in Convert format for `--font` (gitignored: third party fonts are
   not committed; the README tells users to bring their own). Tested with a 26 px Old
   English (one size) and NLQ (10-24, several sizes per file).
-- `input/`: images (`name.png`), optional stories (`name.txt`) and optional demo questions
+- `input/`: images (`name.png`; or `name-p.png` / `name-n.png`, which a PAL / NTSC build
+  converts instead: `image_name` maps either to `name.png`, `image_source` picks the file
+  per system, falling back to `name.png`; main errors if neither exists; the Makefile's
+  `src` does the same for the json dependencies), optional stories (`name.txt`) and optional demo questions
   (`name.ask`, builds `build/pal/ask-name.prg`). `images/` holds older test images (local
   only, gitignored). `build/` is generated and gitignored.
 
@@ -126,11 +136,15 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 - Dual disk (`build --dual`, `make DUAL=1`): `build_system` runs for PAL and NTSC (cached
   conversions, own disks), then `build_dual` writes `build/dual/` with diskshow and viewer
   assembled `DUAL=1`: they call `v2i_detect` (KERNAL on) and add `-P.V2I`/`-N.V2I` to the
-  image names (base cut to 10 by `dual_base`); texts are shared (layout depends on the
-  position only). The v2i demo is assembled `DUAL=1` there too, with the first image's
+  image names (base cut to 10 by `dual_base`). A text is shared (`NAME.TXT`) when both
+  systems pack it byte for byte the same (same position and size), else written as
+  `NAME-P.TXT`/`NAME-N.TXT` (`dual_texts`; sizes differ with `-p`/`-n` inputs): diskshow
+  gets a text name table per system (`tname`, `ntname`); the viewer, when the suffixed
+  `.V2I` loaded, swaps its `V2I` for `TXT` and falls back to `NAME.TXT`. The v2i demo is assembled `DUAL=1` there too, with the first image's
   PAL and NTSC `.v2i` both embedded (`demo_img`, `demo_img_n`), picked by `v2i_system`
   after `v2i_init`; it replaces the `v2i demo-p`/`-n` pair on the dual disk. `--verify`
-  with `--dual` also boots the dual diskshow and runs the dual v2i demo on both systems.
+  with `--dual` also boots the dual diskshow, the dual viewer (typing the first image's
+  `dual_base`) and the dual v2i demo on both systems.
   diskshow's hold time is `HOLD_SECS`, multiplied by 50 or 60 at startup.
 - Buffers: diskshow and the viewer load images at `$2800` (`PLAYER_BUF`; build asserts a
   `.v2i` fits below `$9800`) and texts at `$9800`. The programs may use up to `$27ff`:

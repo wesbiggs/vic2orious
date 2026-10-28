@@ -5,7 +5,8 @@
 ; loads the text screen says which (the KERNAL loader can't run beside a kernel, so the
 ; image can't stay up).
 ; Assembled with DUAL=1 it is for a disk with both PAL and NTSC images: it loads
-; <name>-p.v2i or <name>-n.v2i, whichever suits the machine (the texts are shared).
+; <name>-p.v2i or <name>-n.v2i, whichever suits the machine, and the text named for that
+; machine in diskshow.inc (one shared, or <name>-p.txt / -n.txt when the layouts differ).
 
         .include "diskshow.inc"         ; generated: SHOW_COUNT, HOLD_SECS, file names
 
@@ -106,10 +107,20 @@ load:   lda #<msg_loading
         lda #0
         sta hastext
         ldx cur
+.if DUAL
+        lda v2i_system
+        cmp #V2I_NTSC
+        bne :+
+        ldy ntname_hi,x
+        beq show
+        lda ntname_lo,x
+        jmp @tname
+:
+.endif
         ldy tname_hi,x
         beq show
         lda tname_lo,x
-        jsr fname
+@tname: jsr fname
         ldx #<TXTBUF
         ldy #>TXTBUF
         jsr loadfile

@@ -25,24 +25,35 @@ pixel perfect.
 
 ## 1. Prepare an image
 
-Images must use the 16 C64 colours (Pepto palette), with width and height multiples of 8
+Images must use the 16 C64 colours (Pepto or Colodore palette, or Colodore as VICE
+shows it, which `tools/img2c64.py` writes; other colours go to the nearest Pepto colour),
+with width and height multiples of 8
 (up to the full screen, 320x200). Smaller and simpler images convert better; dithering hurts.
 
-`tools/png2c64.py` maps any picture to the C64 palette. Resize the picture to the size you
-want first, then:
+`tools/img2c64.py` turns any picture (anything Pillow reads; HEIC with `pillow-heif`)
+into C64 input: it converts to sRGB, stretches the width for the system's pixel shape
+(C64 pixels are about 0.94 as wide as tall on PAL TVs, 0.75 on NTSC), shrinks to fit
+320x200 if needed, rounds both sides to multiples of 8 and maps to the palette:
 
 ```bash
-python3 tools/png2c64.py picture.png -o input/name.png    # one picture
-python3 tools/png2c64.py "pics/*.png" -o input/           # many, keeping their names
+python3 tools/img2c64.py photo.jpg -o input/name.png    # input/name-p.png, input/name-n.png
+python3 tools/img2c64.py "pics/*.jpg" -o input/         # many, keeping their names
+python3 tools/img2c64.py art.png -a none -o input/art.png   # as is, no stretch, no suffix
 ```
 
+- `-a both` (default) writes a PAL (`-p`) and an NTSC (`-n`) version; `-a pal` or
+  `-a ntsc` only one; `-a none` keeps the shape (for pixel art drawn at C64 size). The
+  build treats `name-p.png` and `name-n.png` as image `name`: a PAL build uses
+  `name-p.png` and an NTSC build `name-n.png`, each falling back to `name.png` (an error
+  if that is missing too). The story and questions stay `name.txt` / `name.ask`.
 - `-o` takes a file name (default `out.png`) or a directory (one that exists, or a path
   ending in `/`), where each picture keeps its name with a `.png` extension. Several
   inputs or a glob pattern need a directory.
 - `-d none` turns off dithering. The default, `-d floydsteinberg`, often looks better on
   photos, but dithered images are harder to convert exactly, so try both.
 - For a frame around the picture, don't draw one into the image: build with
-  `make FRAME=1`, and the C64 draws it.
+  `make FRAME=1`, and the C64 draws it. Add `-b` here so the picture leaves room for it
+  (it fits 304x184 instead of 320x200: one character cell on each side).
 
 ## 2. Add a story (optional)
 
@@ -89,7 +100,9 @@ are two cycles longer.
 
 **Both on one disk:** `make DUAL=1` builds for both systems and writes
 `build/dual/vic2orious.d81` (or `.d64` if it fits) with every image twice,
-`<name>-p.v2i` and `<name>-n.v2i` (names cut to 10 characters), the stories once, and a
+`<name>-p.v2i` and `<name>-n.v2i` (names cut to 10 characters), the stories once
+(twice, `<name>-p.txt` and `<name>-n.txt`, when the two versions of an image differ in
+size and the text sits differently beside them), and a
 `diskshow` and `viewer` that detect the machine and load the matching files (in the
 viewer, type the name without the ending). `v2i demo` holds both versions of its image
 and shows the one for the machine (`build/dual/v2i-demo.prg`). The other programs with

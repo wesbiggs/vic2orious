@@ -2,7 +2,8 @@
 ; If a text file named like the image (first 12 characters + ".TXT") exists, it is drawn
 ; next to the image. Space returns to the file prompt; an empty file name exits to BASIC.
 ; Assembled with DUAL=1 (a disk with PAL and NTSC images) it first tries the name +
-; "-p.v2i" or "-n.v2i", whichever suits the machine, then the name as typed.
+; "-p.v2i" or "-n.v2i", whichever suits the machine, then the name as typed; with the
+; first, the text is name + "-p.txt" / "-n.txt" if that exists, else as above.
 
 CHRIN   = $ffcf
 CHROUT  = $ffd2
@@ -56,6 +57,8 @@ prompt: lda #<msg_prompt
         ldy #>msg_loading
         jsr print
 .if DUAL
+        lda #0
+        sta dualname
         lda namelen                     ; name + "-P.V2I" / "-N.V2I", if that fits in 16
         cmp #11
         bcs @plain
@@ -86,6 +89,8 @@ prompt: lda #<msg_prompt
         ldx #<LOADBUF
         ldy #>LOADBUF
         jsr loadfile
+        bcs @plain
+        inc dualname
         bcc @check
 @plain:
 .endif
@@ -107,9 +112,31 @@ prompt: lda #<msg_prompt
         bne @bad
         dex
         bpl @cm
-        lda #0                          ; optional text: name[0..11] + ".TXT"
+        lda #0
         sta hastext
-        ldx namelen
+.if DUAL
+        lda dualname                    ; loaded name + "-P.V2I": try name + "-P.TXT"
+        beq @shared
+        ldy namelen
+        ldx #0
+:       lda txtext+1,x
+        sta namebuf+3,y
+        iny
+        inx
+        cpx #3
+        bne :-
+        tya
+        clc
+        adc #3
+        ldx #<namebuf
+        ldy #>namebuf
+        jsr SETNAM
+        jsr loadtext
+        lda hastext
+        bne view
+@shared:
+.endif
+        ldx namelen                     ; optional text: name[0..11] + ".TXT"
         cpx #12
         bcc :+
         ldx #12
@@ -124,17 +151,7 @@ prompt: lda #<msg_prompt
         ldx #<name
         ldy #>name
         jsr SETNAM
-        ldx #<TXTBUF
-        ldy #>TXTBUF
-        jsr loadfile
-        bcs view
-        ldx #3
-:       lda TXTBUF,x
-        cmp tmagic,x
-        bne view
-        dex
-        bpl :-
-        inc hastext
+        jsr loadtext
         jmp view
 @bad:   lda #<msg_notv2i
         ldy #>msg_notv2i
@@ -178,6 +195,20 @@ view:   jsr v2i_init
         bne @flush
         jmp prompt
 
+loadtext:                               ; load the text file set by SETNAM to TXTBUF; if it
+        ldx #<TXTBUF                    ; is a .v2t, set hastext
+        ldy #>TXTBUF
+        jsr loadfile
+        bcs @no
+        ldx #3
+:       lda TXTBUF,x
+        cmp tmagic,x
+        bne @no
+        dex
+        bpl :-
+        inc hastext
+@no:    rts
+
 loadfile:                               ; load the file set by SETNAM to X/Y; C=1 on error
         stx vptr
         sty vptr+1
@@ -218,6 +249,7 @@ name:   .res 17
 .if DUAL
 suffix: .byte "-P.V2I", "-N.V2I"
 namebuf: .res 16
+dualname: .byte 0                       ; 1: the image was loaded as name + suffix
 .endif
 
         .include "v2i.inc"

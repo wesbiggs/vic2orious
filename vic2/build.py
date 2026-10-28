@@ -9,6 +9,11 @@ Kernels are cycle exact for one video system: PAL by default, NTSC (6567R8) with
 A PAL build goes to build/pal/, an NTSC build to build/ntsc/, so both can be kept;
 --dual builds both and a disk with both in build/dual/.
 
+Images are named by their input/<name>.png. A PAL build converts input/<name>-p.png
+instead when it exists, an NTSC build input/<name>-n.png (tools/img2c64.py writes these,
+with the width stretched for each system's pixel shape); the name, texts, .ask and disk
+names stay <name>. Naming a -p/-n file on the command line means its <name>.
+
 Each image is converted once: build/<system>/<name>.json records what the conversion depended on,
 and later builds reuse the .v2i while that is unchanged (--force converts anyway).
 --convert-only converts and builds nothing else; the Makefile uses it to convert images one
@@ -70,6 +75,28 @@ CACHE_VERSION = 5             # bump when the .v2i packing below changes
 CACHE_SOURCES = ("convert.py", "timing.py", "palette.py")
 
 
+IMAGE_SUFFIX = {"pal": "-p", "ntsc": "-n"}
+
+
+def image_name(path):
+    """The image a picture file belongs to: input/name-p.png and -n.png are input/name.png."""
+    base, ext = os.path.splitext(path)
+    for sfx in IMAGE_SUFFIX.values():
+        if base.endswith(sfx):
+            return base[:-len(sfx)] + ext
+    return path
+
+
+def image_source(path, standard=None):
+    """The file to convert for image path on standard (default: the current one): its
+    -p/-n version if there is one, else path itself. None if neither exists."""
+    base, ext = os.path.splitext(path)
+    for f in (base + IMAGE_SUFFIX[standard or timing.STANDARD] + ext, path):
+        if os.path.exists(f):
+            return f
+    return None
+
+
 def cache_key(path, frame, at):
     """Everything an image conversion depends on: the image, the options and the converter
     sources. Not the text: make_text packs that again on every build (it is quick)."""
@@ -111,16 +138,18 @@ def cached_image(path, key):
 
 
 def convert_image(path, log=print, frame=False, leading=TEXT_LEADING, at=None, force=False):
-    """Convert one image to build/<name>.v2i, reusing the previous result (build/<name>.json)
-    when nothing it depends on changed, unless force; then pack its text (input/<name>.txt)
-    to build/<name>.txt.prg with the current font."""
+    """Convert one image (image_source(path): its -p/-n file if any) to build/<name>.v2i,
+    reusing the previous result (build/<name>.json) when nothing it depends on changed,
+    unless force; then pack its text (input/<name>.txt) to build/<name>.txt.prg with the
+    current font."""
     name = os.path.splitext(os.path.basename(path))[0]
-    key = cache_key(path, frame, at)
+    src = image_source(path)
+    key = cache_key(src, frame, at)
     inf = None if force else cached_image(path, key)
     if inf:
         log_stats(inf, log, cached=True)
     else:
-        inf = convert_new(path, name, key, log, frame, at)
+        inf = convert_new(src, name, key, log, frame, at)
     txt = os.path.splitext(path)[0] + ".txt"
     inf["txt"] = make_text(txt, inf["geom"], name, log, leading) if os.path.exists(txt) else None
     return inf
@@ -226,20 +255,27 @@ def write_inc(infos, auto_frames):
         f.write("\n".join(lines) + "\n")
 
 
-def write_diskshow_inc(infos, hold_secs, dual=False):
-    """File names for asm/diskshow.s, as c1541 writes them (see make_disk). dual: the image
-    names without their -p.v2i / -n.v2i (diskshow adds the one that suits the machine)."""
+def write_diskshow_inc(infos, hold_secs, dual_texts=None):
+    """File names for asm/diskshow.s, as c1541 writes them (see make_disk). dual_texts (for
+    the dual disk, see dual_texts): the image names without their -p.v2i / -n.v2i
+    (diskshow adds the one that suits the machine), and a text name table per system."""
     def entry(label, name):
         return "%s: .byte %d,%s" % (label, len(name), ",".join("$%02x" % petscii(c) for c in name))
+
+    def table(label, names, prefix):
+        lines.append("%s_lo: .byte %s" % (label, ",".join(
+            "<%s%d" % (prefix, i) if n else "0" for i, n in enumerate(names))))
+        lines.append("%s_hi: .byte %s" % (label, ",".join(
+            ">%s%d" % (prefix, i) if n else "0" for i, n in enumerate(names))))
+        lines.extend(entry("%s%d" % (prefix, i), n) for i, n in enumerate(names) if n)
     lines = ["SHOW_COUNT = %d" % len(infos), "HOLD_SECS = %d" % hold_secs, "", "        .data"]
-    lines.append("name_lo: .byte %s" % ",".join("<dsn%d" % i for i in range(len(infos))))
-    lines.append("name_hi: .byte %s" % ",".join(">dsn%d" % i for i in range(len(infos))))
-    lines.append("tname_lo: .byte %s" % ",".join("<dst%d" % i if f["txt"] else "0" for i, f in enumerate(infos)))
-    lines.append("tname_hi: .byte %s" % ",".join(">dst%d" % i if f["txt"] else "0" for i, f in enumerate(infos)))
-    for i, inf in enumerate(infos):
-        lines.append(entry("dsn%d" % i, dual_base(inf["name"]) if dual else disk_name(inf["name"])))
-        if inf["txt"]:
-            lines.append(entry("dst%d" % i, text_disk_name(inf["name"])))
+    table("name", [dual_base(f["name"]) if dual_texts else disk_name(f["name"]) for f in infos],
+          "dsn")
+    if dual_texts:
+        table("tname", [t[0] for t in dual_texts], "dst")
+        table("ntname", [t[1] for t in dual_texts], "dsu")
+    else:
+        table("tname", [text_disk_name(f["name"]) if f["txt"] else None for f in infos], "dst")
     with open(os.path.join(BUILD, "diskshow.inc"), "w") as f:
         f.write("\n".join(lines) + "\n")
 
@@ -320,6 +356,29 @@ def dual_base(name):
 
 
 SUFFIX = {"pal": "-P", "ntsc": "-N"}
+
+
+def dual_texts(pal_infos, ntsc_infos):
+    """Text files of the dual disk: [(PAL disk name, NTSC disk name, [(file, disk name)])],
+    one per image (names None without a text). One shared NAME.TXT when both systems lay the
+    text out the same (same position and size), else NAME-P.TXT and NAME-N.TXT (name cut
+    like dual_base)."""
+    res = []
+    for p, n in zip(pal_infos, ntsc_infos):
+        def data(inf):
+            if not inf["txt"]:
+                return None
+            with open(inf["txt"], "rb") as f:
+                return f.read()
+        if data(p) == data(n):
+            name = text_disk_name(p["name"]) if p["txt"] else None
+            res.append((name, name, [(p["txt"], name)] if name else []))
+            continue
+        names = [dual_base(inf["name"]) + SUFFIX[std] + ".TXT" if inf["txt"] else None
+                 for inf, std in ((p, "pal"), (n, "ntsc"))]
+        res.append((names[0], names[1],
+                    [(inf["txt"], nm) for inf, nm in zip((p, n), names) if nm]))
+    return res
 
 
 def petscii(c):
@@ -405,8 +464,9 @@ def assemble_slideshow(prg, infos, auto, frame):
     raise SystemExit("not even the first image fits in the slideshow")
 
 
-def diskshow_screenshot(prg, disk, png, cycles):
-    """Like vice_screenshot, with disk in drive 8 (true drive emulation)."""
+def diskshow_screenshot(prg, disk, png, cycles, keys=None):
+    """Like vice_screenshot, with disk in drive 8 (true drive emulation); keys: typed into
+    the KERNAL keyboard buffer (the viewer's file name)."""
     if os.path.exists(png):
         os.remove(png)
     cmd = ["x64sc", "-default", "-" + timing.STANDARD, "-warp", "-sounddev", "dummy", "+sound",
@@ -415,6 +475,8 @@ def diskshow_screenshot(prg, disk, png, cycles):
         cmd += ["-drive8type", "1581"]
     cmd += ["-8", disk, "-autostartprgmode", "1", "-autostart", prg,
             "-limitcycles", str(cycles), "-exitscreenshot", png]
+    if keys:
+        cmd += ["-keybuf", keys]
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
     return os.path.exists(png)
 
@@ -940,18 +1002,18 @@ def build_dual(a, res):
     pal, ntsc = res["pal"], res["ntsc"]
     use_system("pal", dual=True)
     diskshow = os.path.join(BUILD, "diskshow.prg")
-    write_diskshow_inc(pal["infos"], a.hold, dual=True)
+    texts = dual_texts(pal["infos"], ntsc["infos"])
+    write_diskshow_inc(pal["infos"], a.hold, texts)
     assemble(diskshow, "diskshow.s", frame=a.frame, defines=["DUAL=1"])
     viewer = os.path.join(BUILD, "viewer.prg")
     assemble(viewer, "viewer.s", frame=a.frame, defines=["DUAL=1"])
     files = [(viewer, "viewer"), (diskshow, "diskshow")]
     for std in ("pal", "ntsc"):
         files.append((res[std]["slideshow"], "slideshow" + SUFFIX[std]))
-    for p, n in zip(pal["infos"], ntsc["infos"]):
+    for p, n, t in zip(pal["infos"], ntsc["infos"], texts):
         files.append((p["v2i"], dual_base(p["name"]) + "-P.V2I"))
         files.append((n["v2i"], dual_base(n["name"]) + "-N.V2I"))
-        if p["txt"]:                    # text layout depends on the position only: shared
-            files.append((p["txt"], text_disk_name(p["name"])))
+        files += t[2]                   # shared, unless the image sizes differ (-p/-n inputs)
     for std in ("pal", "ntsc"):
         for ask, out in res[std]["asks"]:
             files.append((out, "ask " + disk_name(ask.info["name"])[:10] + SUFFIX[std]))
@@ -970,22 +1032,26 @@ def build_dual(a, res):
     if a.verify:
         # the full disk, diskshow holding its first image, on both systems
         one = os.path.join(BUILD, "verify_diskshow.prg")
-        write_diskshow_inc(pal["infos"], 0, dual=True)
+        write_diskshow_inc(pal["infos"], 0, texts)
         assemble(one, "diskshow.s", frame=a.frame, defines=["DUAL=1"])
         for std in ("pal", "ntsc"):
             inf = res[std]["infos"][0]
             timing.set_standard(std)
-            png = os.path.join(BUILD, "vice_diskshow_%s.png" % std)
             size = inf["size"] + (os.path.getsize(inf["txt"]) if inf["txt"] else 0)
-            label = "dual diskshow on %s" % std.upper()
-            if diskshow_screenshot(one, disk, png, 40_000_000 + 8_000 * size):
-                r = compare_screenshot(png, expected_screen(inf).pixels())
-                n = len(r[2]) if r else -1
-                print("  %s: VICE output vs model: %d differing pixels" % (label, n))
-                ok &= n == 0
-            else:
-                print("  %s: no screenshot" % label)
-                ok = False
+            # diskshow holding its first image; the viewer, given that image's name
+            for prg, what, keys, cycles in (
+                    (one, "diskshow", None, 40_000_000),
+                    (viewer, "viewer", dual_base(inf["name"]).lower() + "\n", 60_000_000)):
+                png = os.path.join(BUILD, "vice_%s_%s.png" % (what, std))
+                label = "dual %s on %s" % (what, std.upper())
+                if diskshow_screenshot(prg, disk, png, cycles + 8_000 * size, keys):
+                    r = compare_screenshot(png, expected_screen(inf).pixels())
+                    n = len(r[2]) if r else -1
+                    print("  %s: VICE output vs model: %d differing pixels" % (label, n))
+                    ok &= n == 0
+                else:
+                    print("  %s: no screenshot" % label)
+                    ok = False
             ok &= check_in_vice(v2i_demo, os.path.join(BUILD, "vice_v2i_demo_%s.png" % std),
                                 expected_screen(inf, text=False).pixels(),
                                 "dual v2i demo on %s" % std.upper())
@@ -1048,7 +1114,14 @@ def main():
     fonts.use(a.font)
     if a.font:
         print("font: %s, %d pixels high" % (fonts.current().name, fonts.current().height))
-    images = a.images or sorted(glob.glob(os.path.join(ROOT, "input", "*.png")))
+    images = list(dict.fromkeys(image_name(p) for p in (
+        a.images or sorted(glob.glob(os.path.join(ROOT, "input", "*.png"))))))
+    systems = ("pal", "ntsc") if a.dual else ("ntsc",) if a.ntsc else ("pal",)
+    missing = ["%s (no %s for %s)" % (p, os.path.basename(
+                   os.path.splitext(p)[0] + IMAGE_SUFFIX[std] + ".png"), std.upper())
+               for p in images for std in systems if not image_source(p, std)]
+    if missing:
+        raise SystemExit("missing images: " + ", ".join(missing))
     if a.dual:
         res = {}
         ok = True
