@@ -9,7 +9,7 @@ the machine back afterwards. It is ca65 source:
 
 It doesn't need `v2t.inc`. To draw text beside the image, include both: `v2t.inc`'s
 defaults match v2i's screen layout ([v2t-lib.md](v2t-lib.md)). `asm/v2i-demo.s` is the
-smallest complete program; assembled with `DUAL=1` it embeds a PAL and an NTSC `.v2i`
+smallest complete program (the build gives it its first image centred on the screen); assembled with `DUAL=1` it embeds a PAL and an NTSC `.v2i`
 and passes `v2i_show` the one that matches `v2i_system`. `asm/slideshow.s`, `asm/diskshow.s`, `asm/viewer.s` and
 `asm/ask.s` use both libraries.
 

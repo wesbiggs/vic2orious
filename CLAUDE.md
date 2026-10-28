@@ -68,8 +68,12 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 
 ## How it works (the parts that are easy to break)
 
-- Image sits at the upper left by default (char row 0, column 0, so image line 0 is raster
-  $33 and sprite X = 24 + column); `build --at C,R` places it elsewhere (`Geometry`). The
+- An image with text (`name.txt` or `name.ask`, `has_text`) sits at the upper left by
+  default (char row 0, column 0, so image line 0 is raster $33 and sprite X = 24 +
+  column); one without is centred (`place`: column (40 - cols) // 2, row (25 - rows) // 2).
+  The v2i demo shows no text, so it gets a centred second conversion of its image
+  (`demo_image`, `build/<system>/<name>-centred.*`) when the image has text.
+  `build --at C,R` places all of them (`Geometry`), the demo's too. The
   position is baked into the kernel: moving by whole chars changes the schedule (pixel
   windows shift by a cycle per char while DMA stalls stay put; sprite blocks are at
   absolute raster lines, 21 apart). Sizes are multiples of 8, up to 320x200 anywhere on
@@ -84,8 +88,8 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   counts a crossing as 0.8 writes; `pick_x` keeps the high bit when the range allows.
   The 320x200 `input/dragon.png` needs 55 `$d010` writes; most of its ~2100 wrong pixels
   are lines needing more than 8 spans, not timing.
-- Frame (`build -b`, for all images of a build): images move to char row 1, column 1
-  (raster $3b, X = 32 + column; or to `--at`) and the programs are assembled with
+- Frame (`build -b`, for all images of a build): images with text move to char row 1,
+  column 1 (raster $3b, X = 32 + column; centred ones stay centred; or to `--at`) and the programs are assembled with
   `FRAME=1`, so they call `v2i_frame`, which draws a 4 px frame
   (white/white/black/white) into the ring of cells around the image if it fits on
   screen. The `.v2i` format does not know about it. Images without room for the ring are
@@ -262,7 +266,8 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 - First version stopped at the first line that could not be reproduced and blacked out the
   rest (ECM+BMM invalid mode). Replaced by doing every line and dropping spans; the ECM
   write was later removed so text can sit below shorter images.
-- Images were first centred on screen, now always upper left.
+- Images were first centred on screen, then always upper left; now upper left only when
+  text needs the rest of the screen.
 - Searching sprite phases so no pointer write falls on a badline: only phases 10, 31, 52
   (all the same mod 21) qualify, so 8 distinct phases are impossible; handled by the
   scheduler instead.

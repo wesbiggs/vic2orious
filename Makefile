@@ -10,7 +10,8 @@ X64     ?= x64sc
 IMAGES  ?=                      # input files to build (default: all of input/*.png;
                                 #    name-p.png / name-n.png are image name for PAL / NTSC)
 FRAME   ?=                      # 1: frame the images (build -b)
-AT      ?=                      # COLUMN,ROW: place the images there (build --at)
+AT      ?=                      # COLUMN,ROW: place the images there (build --at; default:
+                                #    upper left with a text, else centred)
 LEADING ?=                      # pixel lines between text lines (default 2)
 FONT    ?=                      # FILE.cvt[:SIZE]: GEOS font for the texts (build --font;
                                 #    default: the character ROM's)
@@ -79,7 +80,7 @@ build: $(STAMP)
 convert: $(JSONS)
 
 define system_rules
-$(foreach p,$(PNGS),$(eval $(DIR_$(1))/$(basename $(notdir $(p))).json: $(call src,$(1),$(p)) $(wildcard $(basename $(p)).txt)))
+$(foreach p,$(PNGS),$(eval $(DIR_$(1))/$(basename $(notdir $(p))).json: $(call src,$(1),$(p)) $(wildcard $(basename $(p)).txt $(basename $(p)).ask)))
 $(call jsons,$(1)): $(wildcard vic2/*.py) $(FONTFILE) $(DIR_$(1))/.copts
 	$(PYTHON) -m vic2.build --convert-only $(COPTS_$(1)) $$(filter %.png,$$^)
 endef

@@ -83,7 +83,7 @@ for each topic a line `> K label` (K is the key, 1-9) followed by the answer's p
 ```bash
 make                                  # all images in input/
 make IMAGES="input/a.png input/b.png" # or just these
-make FRAME=1                          # frame the images (row 1, column 1)
+make FRAME=1                          # frame the images (with a text: at row 1, column 1)
 make AT=2,3                           # place the images at character column 2, row 3
 make -j8                              # convert up to 8 images at once
 make convert                          # only convert the images (build/pal/<name>.v2i)
@@ -124,6 +124,10 @@ what the conversion depended on
 `.v2i` while all that stays the same, so adding an image only converts that one. Stories
 are laid out again on every build, so editing one, or changing `FONT` or `LEADING`,
 converts nothing. `python3 -m vic2.build --force` converts everything again.
+
+Images with a story or an `.ask` sit at the upper left, leaving the rest of the screen
+for the text; images without one are centred, and so is the image in `v2i-demo.prg`
+(the first image, converted a second time if it has a story). `AT` places all of them.
 
 For every image the build prints how many lines and pixels could not be reproduced
 exactly, and writes `build/pal/<name>_compare.png` (source | C64 result | wrong pixels in

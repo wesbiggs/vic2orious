@@ -14,6 +14,10 @@ instead when it exists, an NTSC build input/<name>-n.png (tools/img2c64.py write
 with the width stretched for each system's pixel shape); the name, texts, .ask and disk
 names stay <name>. Naming a -p/-n file on the command line means its <name>.
 
+Images with a story or an .ask sit at the upper left (row 1, column 1 with -b), leaving
+the rest of the screen for the text; images without one, and the image of the v2i demo,
+are centred. --at places all of them.
+
 Each image is converted once: build/<system>/<name>.json records what the conversion depended on,
 and later builds reuse the .v2i while that is unchanged (--force converts anyway).
 --convert-only converts and builds nothing else; the Makefile uses it to convert images one
@@ -97,10 +101,31 @@ def image_source(path, standard=None):
     return None
 
 
-def cache_key(path, frame, at):
+def has_text(path):
+    """Whether image path comes with text to show beside it (a story or an ask demo)."""
+    base = os.path.splitext(path)[0]
+    return any(os.path.exists(base + e) for e in (".txt", ".ask"))
+
+
+def place(cols, rows, frame, at, centre):
+    """(column, row) of a cols x rows image: at if given, else centred on the screen if
+    centre (images without text), else the upper left corner (row 1, column 1 with a
+    frame). A frame that has no room there is dropped: returns (column, row, frame)."""
+    def pos(frame):
+        if at:
+            return at
+        if centre:
+            return (40 - cols) // 2, (25 - rows) // 2
+        return (1, 1) if frame else (0, 0)
+    if frame and not convert.Geometry.frame_fits(*pos(True), cols, rows):
+        frame = False
+    return pos(frame) + (frame,)
+
+
+def cache_key(path, frame, at, centre):
     """Everything an image conversion depends on: the image, the options and the converter
     sources. Not the text: make_text packs that again on every build (it is quick)."""
-    h = hashlib.sha1(repr((CACHE_VERSION, timing.STANDARD, frame, at)).encode())
+    h = hashlib.sha1(repr((CACHE_VERSION, timing.STANDARD, frame, at, centre)).encode())
     for f in [path] + [os.path.join(ROOT, "vic2", s) for s in CACHE_SOURCES]:
         if os.path.exists(f):             # contents only: the same file may be named
             with open(f, "rb") as fh:     # by a relative or an absolute path
@@ -118,9 +143,8 @@ def log_stats(inf, log, cached=False):
          inf["first_bad"], inf["size"], "  (cached)" if cached else ""))
 
 
-def cached_image(path, key):
-    """The info convert_image returned for path last time, if nothing changed since."""
-    name = os.path.splitext(os.path.basename(path))[0]
+def cached_image(name, key):
+    """The info convert_image returned for name last time, if nothing changed since."""
     meta = os.path.join(BUILD, name + ".json")
     try:
         with open(meta) as f:
@@ -137,33 +161,39 @@ def cached_image(path, key):
     return inf
 
 
-def convert_image(path, log=print, frame=False, leading=TEXT_LEADING, at=None, force=False):
+def convert_image(path, log=print, frame=False, leading=TEXT_LEADING, at=None, force=False,
+                  centre=None, suffix=""):
     """Convert one image (image_source(path): its -p/-n file if any) to build/<name>.v2i,
     reusing the previous result (build/<name>.json) when nothing it depends on changed,
     unless force; then pack its text (input/<name>.txt) to build/<name>.txt.prg with the
-    current font."""
-    name = os.path.splitext(os.path.basename(path))[0]
+    current font. Without at, the image is centred if centre (default: if it has no text,
+    see has_text). suffix is added to the name of the build files (a second version of
+    the image), and leaves out the text."""
+    name = os.path.splitext(os.path.basename(path))[0] + suffix
     src = image_source(path)
-    key = cache_key(src, frame, at)
-    inf = None if force else cached_image(path, key)
+    if centre is None:
+        centre = not has_text(path)
+    centre = centre and not at
+    key = cache_key(src, frame, at, centre)
+    inf = None if force else cached_image(name, key)
     if inf:
         log_stats(inf, log, cached=True)
     else:
-        inf = convert_new(src, name, key, log, frame, at)
+        inf = convert_new(src, name, key, log, frame, at, centre)
     txt = os.path.splitext(path)[0] + ".txt"
-    inf["txt"] = make_text(txt, inf["geom"], name, log, leading) if os.path.exists(txt) else None
+    inf["txt"] = (make_text(txt, inf["geom"], name, log, leading)
+                  if os.path.exists(txt) and not suffix else None)
     return inf
 
 
-def convert_new(path, name, key, log, frame, at):
+def convert_new(path, name, key, log, frame, at, centre):
     """convert_image without the cache and the text."""
     w, h, img = load_indexed(path)
-    pos = at or ((1, 1) if frame else (0, 0))
-    if frame and not convert.Geometry.frame_fits(pos[0], pos[1], w // 8, h // 8):
+    col0, row0, fits = place(w // 8, h // 8, frame, at, centre)
+    if frame and not fits:
         log("  %s: %dx%d, no room for a frame" % (name, w, h))
-        frame = False
-        pos = at or (0, 0)
-    conv = convert.Converter(img, log=lambda m: log("  " + m), frame=frame, at=pos)
+    frame = fits
+    conv = convert.Converter(img, log=lambda m: log("  " + m), frame=frame, at=(col0, row0))
     g = conv.g
     conv.run()
     bits = conv.bitmap()
@@ -855,6 +885,14 @@ def use_system(standard, dual=False):
     os.makedirs(BUILD, exist_ok=True)
 
 
+def demo_image(a, path, inf, at):
+    """The first image as the v2i demo shows it: centred (it shows no text), unless --at
+    places it. A second conversion (build/<name>-centred.v2i) if the image has text."""
+    if at or not has_text(path):
+        return inf
+    return convert_image(path, frame=a.frame, force=a.force, centre=True, suffix="-centred")
+
+
 def build_system(a, images, at, standard):
     """Convert the images for one video system and build its programs and disk (and verify
     them). Returns (ok, the built files by role)."""
@@ -875,8 +913,9 @@ def build_system(a, images, at, standard):
     assemble(viewer, "viewer.s", frame=a.frame)
     demos = []
     v2i_demo = os.path.join(BUILD, "v2i-demo.prg")
+    demo = demo_image(a, images[0], infos[0], at)
     with open(os.path.join(BUILD, "v2idemo.inc"), "w") as f:
-        f.write('        .data\ndemo_img: .incbin "%s", 2\n' % infos[0]["v2i"])
+        f.write('        .data\ndemo_img: .incbin "%s", 2\n' % demo["v2i"])
     assemble(v2i_demo, "v2i-demo.s", frame=a.frame)
     demos.append((v2i_demo, "v2i demo"))
     story = v2t_demo_text(infos)
@@ -937,7 +976,7 @@ def build_system(a, images, at, standard):
             png = os.path.join(BUILD, "vice_ask_%s.png" % ask.info["name"])
             ok &= check_in_vice(one, png, scr.pixels(), "ask " + ask.info["name"])
         ok &= check_in_vice(v2i_demo, os.path.join(BUILD, "vice_v2i_demo.png"),
-                            expected_screen(infos[0], text=False).pixels(), "v2i demo")
+                            expected_screen(demo, text=False).pixels(), "v2i demo")
         ok &= check_in_vice(v2t_demo, os.path.join(BUILD, "vice_v2t_demo.png"),
                             v2t_demo_screen(story).pixels(), "v2t demo")
         # scroll demo: down to v1, back up to v2 by itself
@@ -992,7 +1031,7 @@ def build_system(a, images, at, standard):
         assemble(diskshow, "diskshow.s", frame=a.frame)
         assemble_slideshow(prg, infos, a.auto, a.frame)
     return ok, dict(infos=infos, slideshow=prg, diskshow=diskshow, viewer=viewer, asks=asks,
-                    demos=demos, disk=disk)
+                    demo=demo, demos=demos, disk=disk)
 
 
 def build_dual(a, res):
@@ -1020,7 +1059,7 @@ def build_dual(a, res):
     v2i_demo = os.path.join(BUILD, "v2i-demo.prg")
     with open(os.path.join(BUILD, "v2idemo.inc"), "w") as f:
         f.write('        .data\ndemo_img: .incbin "%s", 2\ndemo_img_n: .incbin "%s", 2\n'
-                % (pal["infos"][0]["v2i"], ntsc["infos"][0]["v2i"]))
+                % (pal["demo"]["v2i"], ntsc["demo"]["v2i"]))
     assemble(v2i_demo, "v2i-demo.s", frame=a.frame, defines=["DUAL=1"])
     files.append((v2i_demo, "v2i demo"))
     files += [d for d in pal["demos"] if d[1] != "v2i demo"]
@@ -1053,7 +1092,7 @@ def build_dual(a, res):
                     print("  %s: no screenshot" % label)
                     ok = False
             ok &= check_in_vice(v2i_demo, os.path.join(BUILD, "vice_v2i_demo_%s.png" % std),
-                                expected_screen(inf, text=False).pixels(),
+                                expected_screen(res[std]["demo"], text=False).pixels(),
                                 "dual v2i demo on %s" % std.upper())
         timing.set_standard("pal")
     return ok, disk
@@ -1073,8 +1112,9 @@ def main():
                     help="GEOS font (Convert format) for the texts, its smallest point size "
                          "unless SIZE is given (default: the character ROM's)")
     ap.add_argument("--at", metavar="COLUMN,ROW",
-                    help="place the images at this character column and row (default 0,0; 1,1 "
-                         "with -b)")
+                    help="place the images at this character column and row (default: 0,0, "
+                         "or 1,1 with -b, for images with a text or .ask; centred on the "
+                         "screen for the others and in the v2i demo)")
     ap.add_argument("--auto", type=int, default=250,
                     help="frames per image (max 255) in the slideshow (0: until space)")
     ap.add_argument("--hold", type=int, default=15,
