@@ -334,6 +334,17 @@ class Converter:
                 pre += fixed[r]
         sch.add(pre, RASTER0 - 1)
 
+        # end of image: sprites off before any further Y compare, so no block starts without
+        # its pointer (the rest of the screen may hold text); after the Y compares in the last
+        # line, so the blocks starting below it always start (sprite_lines models them).
+        # Scheduled with the last line, so fit_line can drop spans for it: above a badline
+        # a full width image leaves it a single cycle
+        r = RASTER0 + IMG_H
+        lo = max(T(r - 1, pc(XREG0 + IMG_W - 1) + 1 + MARGIN), T(r - 1, timing.Y_AFTER))
+        off = sch.new_task(0xD015, 0, lo, T(r, 54), "off")
+        fixed.setdefault(r - 1, []).extend(
+            [off] + [p for (B, p) in ptr_tasks if B <= r and timing.raster_of(p.hi) >= r])
+
         # sprite state
         cfg = [None] * 8          # (xstart, color)
         first_cfg = [None] * 8    # (xstart, color, X high bit set by the prologue)
@@ -372,14 +383,6 @@ class Converter:
                     self.line_cfg[s][RASTER0 + y] = c
                 if why:
                     self.bad_lines[y] = why
-        # end of image: sprites off before any further Y compare, so no block starts without
-        # its pointer (the rest of the screen may hold text); after the Y compares in the last
-        # line, so the blocks starting below it always start (sprite_lines models them)
-        r = RASTER0 + IMG_H
-        lo = max(T(r - 1, pc(XREG0 + IMG_W - 1) + 1 + MARGIN), T(r - 1, timing.Y_AFTER))
-        off = sch.new_task(0xD015, 0, lo, T(r, 54), "off")
-        extra = [p for (B, p) in ptr_tasks if B <= r and p.id not in sch.tasks]
-        sch.add([off] + extra, r)
         self.cut = IMG_H
         sch.finish()
         hi_bits = 0
@@ -407,8 +410,10 @@ class Converter:
             state = (list(cfg), list(first_cfg), list(last_use))
             snap = sch.snapshot()
             fut = [self.spans_of(yy, pairs)[0] for yy in range(y + 1, min(cy * 8 + 8, y + 4))]
+            # the last line also schedules the sprites off write in the line below
+            until = r + 1 if y == g.h - 1 else r
             dropped, cfg, first_cfg, last_use, rows = self.fit_line(
-                sch, spans, state, snap, fixed.get(r, []), r, y, fut)
+                sch, spans, state, snap, fixed.get(r, []), r, until, y, fut)
             wrong += self.recover(y, r, rowpairs, rows, cfg, last_use)
             if dropped:
                 why = (why + "; " if why else "") + "dropped %d span(s) for timing" % len(dropped)
@@ -416,7 +421,7 @@ class Converter:
             prev_spans = spans
         return wrong, cfg, first_cfg, last_use, prev_spans, lines
 
-    def fit_line(self, sch, spans, state, snap, fixed, r, y, fut):
+    def fit_line(self, sch, spans, state, snap, fixed, r, until, y, fut):
         """Schedule one line, dropping spans until its writes fit. Best-first search over the
         sets of dropped spans (fewest lost pixels first, at most FIT_TRIES schedules), then
         greedy: keep dropping the span whose write missed, else the smallest retasked one."""
@@ -426,7 +431,7 @@ class Converter:
             assign = self.assign(live, cfg, last_use, r, fut)
             tasks, rows, owner = self.line_tasks(sch, assign, cfg, first_cfg, last_use, r, y)
             try:
-                sch.add(tasks + fixed, r, rewind)
+                sch.add(tasks + fixed, until, rewind)
                 return (cfg, first_cfg, last_use, rows), None, None
             except SchedFail as e:
                 sch.restore(snap)

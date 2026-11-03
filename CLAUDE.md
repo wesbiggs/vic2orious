@@ -122,7 +122,9 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   without its pointer (otherwise old sprite data repeats below the image). It lands after
   the last line's Y compares, so blocks starting on the line below always start, and
   `sprite_lines` gives each sprite's exact DMA end: `$d015 = 0` does not stop a running
-  block. On NTSC the blocks of an image ending on raster 251 (200 lines) run on to line 8
+  block. It is scheduled with the image's last line (`fixed[r - 1]`, `until` r), so
+  `fit_line` drops spans for it: a full width image ending above a badline leaves it one
+  cycle (r:12), and adding it after the rows failed (`SchedFail` on a pointer write). On NTSC the blocks of an image ending on raster 251 (200 lines) run on to line 8
   of the next frame, which is why the kernel is entered on line 9 (`timing.Vic` leaves
   DMA past the last line out). The prologue writes the Y registers and `$d015` first, so
   sprite 0 is on before its first compare (line 13).
