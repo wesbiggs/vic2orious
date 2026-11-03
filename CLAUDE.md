@@ -322,8 +322,8 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   no better looking); ordered (Bayer) dither between each cell's pair (0% wrong, but the
   cell edges look jagged); saturating the picture instead of desaturating the palette
   (more wrong pixels for the same colour); greens stay rare (Colodore's are far brighter
-  than foliage). F-S at 0.75 hit a converter failure (`fit_line` raising
-  `SchedFail(None, None)` when a Y restart task is left to a badline's only cycle).
+  than foliage). F-S at 0.75 (10% wrong) made `fit_line` fail outright, fixed by
+  the look ahead (see How it works).
 
 ## Ideas not done yet
 
