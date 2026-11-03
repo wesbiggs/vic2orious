@@ -1,7 +1,7 @@
 """Turn pictures into C64-ready PNGs: C64 colours, screen size, PAL/NTSC pixel aspect.
 
 usage: python3 tools/img2c64.py [-a {both,pal,ntsc,none}] [-b] [-d {floydsteinberg,none}]
-                                [-o OUTPUT] INPUT...
+                                [-s WxH] [-o OUTPUT] INPUT...
 
   -o FILE     write to FILE (default: out.png); with an aspect, FILE-p.png / FILE-n.png
   -o DIR/     write each picture to DIR/<input name>[-p|-n].png; DIR is created if needed.
@@ -12,12 +12,13 @@ usage: python3 tools/img2c64.py [-a {both,pal,ntsc,none}] [-b] [-d {floydsteinbe
   -b          leave room for a frame: fit 304x184 instead of 320x200 (one cell on each side,
               where the build draws the frame; see below)
   -d MODE     floydsteinberg (default) or none
+  -s WxH      fit WxH instead of 320x200 (multiples of 8; with -b, also inside 304x184)
 
 Steps: read any format Pillow reads (HEIC too if pillow-heif is installed), apply the EXIF
 orientation, convert from the embedded colour profile to sRGB, flatten transparency onto
 black; stretch the width so the picture keeps its proportions on that system's TV (C64
 pixels are not square: about 0.94 wide on PAL, 0.75 on NTSC); shrink proportionally to fit
-320x200 if needed; round both sides to multiples of 8 (the converter needs that); map to
+320x200 (or -s WxH) if needed; round both sides to multiples of 8 (the converter needs that); map to
 the palette: Colodore as VICE shows it with its default colour controls (VICE's PAL
 rendering for -p and -a none files, its NTSC one for -n). Pictures are never enlarged beyond the stretch. The output is tagged sRGB.
 
@@ -109,21 +110,35 @@ def round8(v, limit):
     return max(8, min(limit, int(v / 8 + 0.5) * 8))
 
 
-def target_size(w, h, system, frame=False):
-    """C64 size for a w x h picture: width stretched by 1/PAR, fitted into 320x200 (304x184
-    with frame)."""
+def target_size(w, h, system, frame=False, box=(MAX_W, MAX_H)):
+    """C64 size for a w x h picture: width stretched by 1/PAR, fitted into box (at most
+    320x200; 304x184 with frame)."""
     if system:
         w = w / PAR[system]
-    mw, mh = (MAX_W - FRAME, MAX_H - FRAME) if frame else (MAX_W, MAX_H)
+    mw, mh = box
+    if frame:
+        mw, mh = min(mw, MAX_W - FRAME), min(mh, MAX_H - FRAME)
     s = min(1.0, mw / w, mh / h)
     return round8(w * s, mw), round8(h * s, mh)
 
 
-def convert(img, system, dither, frame=False):
-    size = target_size(img.width, img.height, system, frame)
+def convert(img, system, dither, frame=False, box=(MAX_W, MAX_H)):
+    size = target_size(img.width, img.height, system, frame, box)
     if size != img.size:
         img = img.resize(size, Image.Resampling.LANCZOS)
     return img.quantize(palette=palette_image(system), dither=DITHER[dither]).convert("RGB")
+
+
+def parse_size(v):
+    """-s WxH: (w, h), multiples of 8 within 320x200."""
+    try:
+        w, h = (int(n) for n in v.lower().split("x"))
+    except ValueError:
+        raise argparse.ArgumentTypeError("takes WIDTHxHEIGHT, e.g. 160x96")
+    if not (8 <= w <= MAX_W and 8 <= h <= MAX_H and w % 8 == 0 and h % 8 == 0):
+        raise argparse.ArgumentTypeError("%s: width and height must be multiples of 8, at "
+                                         "most %dx%d" % (v, MAX_W, MAX_H))
+    return w, h
 
 
 def expand(patterns):
@@ -152,6 +167,8 @@ def main():
                          "304x184 instead of 320x200")
     ap.add_argument("-d", "--dither", default="floydsteinberg", type=str.lower,
                     choices=sorted(DITHER), help="dithering (default floydsteinberg)")
+    ap.add_argument("-s", "--size", type=parse_size, default=(MAX_W, MAX_H), metavar="WxH",
+                    help="fit WxH instead of 320x200 (multiples of 8)")
     a = ap.parse_args()
     inputs = expand(a.inputs)
     to_dir = os.path.isdir(a.output) or a.output.endswith(("/", os.sep))
@@ -173,7 +190,7 @@ def main():
         except (OSError, Image.UnidentifiedImageError) as e:
             raise SystemExit("img2c64: %s" % e)
         for _, dst, system in (j for j in jobs if j[0] == src):
-            out = convert(img, system, a.dither, a.border)
+            out = convert(img, system, a.dither, a.border, a.size)
             out.save(dst, icc_profile=SRGB_ICC)
             print("%s -> %s (%dx%d%s)" % (src, dst, out.width, out.height,
                                           ", " + system.upper() if system else ""))

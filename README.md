@@ -54,17 +54,21 @@ python3 tools/img2c64.py art.png -a none -o input/art.png   # as is, no stretch,
 - For a frame around the picture, don't draw one into the image: build with
   `make FRAME=1`, and the C64 draws it. Add `-b` here so the picture leaves room for it
   (it fits 304x184 instead of 320x200: one character cell on each side).
+- `-s WxH` fits the picture into a smaller box, e.g. `-s 160x96` (multiples of 8). The
+  aspect stretch still applies, so the PAL and NTSC versions can differ in size.
 
 ### One picture, one PRG
 
-`vic2.prg` does all of it for a single picture: img2c64 with its defaults (both aspects,
-Colodore, Floyd-Steinberg, no frame), the conversion for PAL and NTSC (centred), and the
+`vic2.prg` does all of it for a single picture: img2c64 (both aspects, Colodore, no
+frame; Floyd-Steinberg unless `-d none`, up to 320x200 unless `-s WxH`), the conversion for PAL and NTSC (centred), and the
 v2i demo with both kernels, which shows the version for the machine until space:
 
 ```bash
 python3 -m vic2.prg /path/to/my_image.png               # my_image.prg in this directory
 python3 -m vic2.prg photo.jpg -o out/photo.prg --verify  # check both in VICE
-make prg PIC=/path/to/my_image.png                       # the same
+python3 -m vic2.prg logo.png -d none -s 160x96          # no dithering, at most 160x96
+make prg PIC=/path/to/my_image.png                       # the same as the first
+make prg PIC=logo.png DITHER=none SIZE=160x96            # and the third
 ```
 
 Its files go to `build/prg/` (`<name>-p.png`, `<name>-n.png`, and the conversions in

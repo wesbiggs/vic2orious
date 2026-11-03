@@ -28,10 +28,10 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   system: `build/pal/`, `build/ntsc/` (`build/dual/` for the dual disk). The file formats
   are documented in its docstring.
 - `vic2/prg.py`: one picture -> `<name>.prg` (cwd, or `-o`) for PAL and NTSC: runs
-  img2c64 (defaults) into `build/prg/<name>-p/-n.png`, converts each (centred) into
+  img2c64 (`-d`, `-s` passed on, else its defaults) into `build/prg/<name>-p/-n.png`, converts each (centred) into
   `build/prg/pal|ntsc/` (sets `build.BUILD` itself, cached as in the build) and assembles
   `v2i-demo.s` with `DUAL=1`. `--verify` checks both in VICE, `--run [pal|ntsc]`;
-  `make prg PIC=path`.
+  `make prg PIC=path [DITHER=none] [SIZE=WxH]`.
 - `vic2/screen.py`: Python model of the screen as the library's text/clear routines leave
   it (used by `--verify`). `vic2/ask.py`: `.ask` parsing, layout and model for the demo.
 - `vic2/font.py`: proportional fonts as GEOS point-size records: the default derived from
@@ -57,8 +57,8 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   the profile's creation date is zeroed so the same input gives the same file, for the cache).
   Converts the input's ICC profile to sRGB, EXIF orientation,
   alpha onto black; `-a both|pal|ntsc|none` (default both) stretches the width by 1/PAR
-  (PAL 0.936, NTSC 0.75) and writes `-p`/`-n` files; then fits 320x200 and rounds to
-  multiples of 8. `-o FILE` or `-o DIR/` (keeps input names, takes several files / glob
+  (PAL 0.936, NTSC 0.75) and writes `-p`/`-n` files; then fits 320x200 (or `-s WxH`,
+  multiples of 8) and rounds to multiples of 8. `-o FILE` or `-o DIR/` (keeps input names, takes several files / glob
   patterns), `-d floydsteinberg|none`. Refuses to overwrite its input. `-b` only leaves
   room for the frame `v2i_frame` draws (`build -b`): fits 304x184. (Its old `-b` drew the
   frame into the pixels, which did not always convert exactly.)

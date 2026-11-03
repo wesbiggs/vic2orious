@@ -1,10 +1,12 @@
 """One picture -> one standalone PRG that shows it on PAL and NTSC C64s.
 
-usage: python3 -m vic2.prg [-o OUT.prg] [--force] [--verify] [--run [pal|ntsc]] PICTURE
+usage: python3 -m vic2.prg [-o OUT.prg] [-d {floydsteinberg,none}] [-s WxH] [--force]
+                          [--verify] [--run [pal|ntsc]] PICTURE
 
-The picture (any format tools/img2c64.py reads) is quantised by img2c64 with its defaults
-(Colodore as VICE shows it, Floyd-Steinberg, each system's pixel aspect, no room for a
-frame) into build/prg/<name>-p.png and <name>-n.png, converted for each system (build/prg/pal/,
+The picture (any format tools/img2c64.py reads) is quantised by img2c64 (Colodore as VICE
+shows it, each system's pixel aspect, no room for a frame; -d and -s go to img2c64:
+Floyd-Steinberg unless -d none, fitted into 320x200 unless -s WxH) into
+build/prg/<name>-p.png and <name>-n.png, converted for each system (build/prg/pal/,
 build/prg/ntsc/, cached like the build's conversions) and centred, and assembled into the
 dual v2i demo (asm/v2i-demo.s, DUAL=1): both kernels in one PRG, which picks the one for
 the machine and returns to BASIC on space. The PRG is <name>.prg in the current directory
@@ -34,6 +36,11 @@ def main():
                                              "NTSC C64s.")
     ap.add_argument("picture")
     ap.add_argument("-o", "--output", help="the PRG to write (default: <name>.prg)")
+    ap.add_argument("-d", "--dither", default="floydsteinberg", type=str.lower,
+                    choices=("floydsteinberg", "none"),
+                    help="dithering (default floydsteinberg)")
+    ap.add_argument("-s", "--size", metavar="WxH",
+                    help="fit WxH instead of 320x200 (multiples of 8)")
     ap.add_argument("--force", action="store_true", help="convert even if unchanged")
     ap.add_argument("--verify", action="store_true",
                     help="run the PRG in PAL and NTSC VICE and compare with the model")
@@ -44,7 +51,11 @@ def main():
     out = os.path.abspath(a.output or name + ".prg")
     os.makedirs(PRG_BUILD, exist_ok=True)
     base = os.path.join(PRG_BUILD, name + ".png")   # its -p/-n files are what gets converted
-    subprocess.run([sys.executable, TOOL, "-o", base, a.picture], check=True)
+    cmd = [sys.executable, TOOL, "-o", base, "-d", a.dither]
+    if a.size:
+        cmd += ["-s", a.size]
+    if subprocess.run(cmd + [a.picture]).returncode:
+        return 1                        # img2c64 said why
     infos = {}
     for std in ("pal", "ntsc"):
         use_system(std)
