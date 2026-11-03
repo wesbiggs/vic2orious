@@ -1,6 +1,6 @@
 """Turn pictures into C64-ready PNGs: C64 colours, screen size, PAL/NTSC pixel aspect.
 
-usage: python3 tools/img2c64.py [-a {both,pal,ntsc,none}] [-b] [-d {floydsteinberg,none}]
+usage: python3 tools/img2c64.py [-a {both,pal,ntsc,none}] [-b] [-c S] [-d MODE]
                                 [-s WxH] [-o OUTPUT] INPUT...
 
   -o FILE     write to FILE (default: out.png); with an aspect, FILE-p.png / FILE-n.png
@@ -11,7 +11,21 @@ usage: python3 tools/img2c64.py [-a {both,pal,ntsc,none}] [-b] [-d {floydsteinbe
               that one only; none: no stretch, no suffix (for pixel art made at C64 size)
   -b          leave room for a frame: fit 304x184 instead of 320x200 (one cell on each side,
               where the build draws the frame; see below)
-  -d MODE     floydsteinberg (default) or none
+  -d MODE     dithering: floydsteinberg (default, Pillow's; also fs), none, or one that
+              leaves the converter fewer pixels it cannot place (in brackets: IMG_1639,
+              320x168 PAL, wrong pixels after conversion; Floyd-Steinberg 15%, none 0.2%):
+              fs:K        Floyd-Steinberg passing on K (0-1) of the error (fs:0.5: 4%)
+              atkinson:K  Atkinson's kernel (6/8 of the error), times K (default 1: 9%;
+                          atkinson:0.75: 5%)
+              hybrid:E    each 8x8 cell's best pair of colours, Floyd-Steinberg between
+                          them, any colour where the pair is more than E (RGB distance,
+                          default 90: 3%; 80: 6%) off; error clamped to +-32
+  -c S        choose colours as if the palette had S times its saturation (default 1;
+              0 < S <= 2); the output still has the real colours. Photos are rarely as
+              saturated as the C64's colours: at 1 their reds, browns and blues fall to
+              grey. With -d hybrid it pays: -c 0.6 on IMG_1639 gives warm stone, a blue
+              sky and 2% wrong (3% at 1). With the others it puts more colours in each
+              cell (fs:0.5: 11% wrong instead of 4%, none: 5% instead of 0.2%).
   -s WxH      fit WxH instead of 320x200 (multiples of 8; with -b, also inside 304x184)
 
 Steps: read any format Pillow reads (HEIC too if pillow-heif is installed), apply the EXIF
@@ -58,7 +72,18 @@ PALETTES = {
     ],
 }
 
-DITHER = {"floydsteinberg": Image.Dither.FLOYDSTEINBERG, "none": Image.Dither.NONE}
+# -d MODE[:PARAM] -> (default PARAM, range); fs/floydsteinberg at full strength is Pillow's
+DITHERS = {"none": None, "floydsteinberg": (1.0, (0.0, 1.0)), "fs": (1.0, (0.0, 1.0)),
+           "atkinson": (1.0, (0.0, 1.0)), "hybrid": (90.0, (0.0, 442.0))}
+# error diffusion kernels: (dx, dy, share); serpentine, so dx is mirrored on odd lines
+KERNELS = {
+    "fs": [(1, 0, 7 / 16), (-1, 1, 3 / 16), (0, 1, 5 / 16), (1, 1, 1 / 16)],
+    "atkinson": [(1, 0, 1 / 8), (2, 0, 1 / 8), (-1, 1, 1 / 8), (0, 1, 1 / 8), (1, 1, 1 / 8),
+                 (0, 2, 1 / 8)],
+}
+HYBRID_CLAMP = 32       # hybrid: carried error per channel at most this
+HYBRID_SPREAD = 0.25    # hybrid: cost of mixing far apart colours when picking a cell's pair
+HYBRID_NEAR = 4         # hybrid: pair candidates are the cell pixels' 4 nearest colours
 
 # Pixel width / height on a 4:3 TV: square-pixel sampling rate of the TV standard over the
 # VIC-II dot clock (PAL 7.375 / 7.882 MHz, NTSC 6.136 / 8.182 MHz).
@@ -75,10 +100,19 @@ SRGB_ICC = ImageCms.ImageCmsProfile(SRGB).tobytes()
 SRGB_ICC = SRGB_ICC[:24] + bytes(12) + SRGB_ICC[36:]
 
 
-def palette_image(system):
-    flat = []
+def palette(system, chroma=1.0):
+    """The system's colours as (r, g, b), each moved away from its own grey (Rec. 601 luma)
+    by chroma: 1 as they are, less to match pictures against paler colours (-c)."""
+    out = []
     for c in PALETTES[system or "pal"]:
-        flat += [(c >> 16) & 255, (c >> 8) & 255, c & 255]
+        rgb = ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+        y = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
+        out.append(tuple(max(0, min(255, int(round(y + chroma * (v - y))))) for v in rgb))
+    return out
+
+
+def palette_image(colours):
+    flat = [v for c in colours for v in c]
     flat += [0] * (768 - len(flat))  # pad to 256 entries
     pal_img = Image.new("P", (1, 1))
     pal_img.putpalette(flat)
@@ -122,11 +156,129 @@ def target_size(w, h, system, frame=False, box=(MAX_W, MAX_H)):
     return round8(w * s, mw), round8(h * s, mh)
 
 
-def convert(img, system, dither, frame=False, box=(MAX_W, MAX_H)):
+def dist2(p, q):
+    return (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 + (p[2] - q[2]) ** 2
+
+
+def nearest(p, pal, cand):
+    return min(cand, key=lambda c: dist2(p, pal[c]))
+
+
+def cell_pairs(px, w, h, pal):
+    """hybrid: two colours per 8x8 cell, the pair whose mixes come closest to the cell's
+    pixels (distance to the segment between them, plus HYBRID_SPREAD times the cost of
+    mixing far apart colours, as in Yliluoma's dithering)."""
+    pairs = {}
+    for cy in range(h // 8):
+        for cx in range(w // 8):
+            cell = [px[y][x] for y in range(cy * 8, cy * 8 + 8) for x in range(cx * 8, cx * 8 + 8)]
+            near = set()
+            for p in cell:
+                near.update(sorted(range(len(pal)), key=lambda c: dist2(p, pal[c]))[:HYBRID_NEAR])
+            near = sorted(near)
+            best = None
+            for i, a in enumerate(near):
+                for b in near[i:]:
+                    A, B = pal[a], pal[b]
+                    d = [B[k] - A[k] for k in range(3)]
+                    dd = d[0] ** 2 + d[1] ** 2 + d[2] ** 2
+                    cost = 0.0
+                    for p in cell:
+                        t = 0.0 if dd == 0 else max(0.0, min(1.0, sum(
+                            (p[k] - A[k]) * d[k] for k in range(3)) / dd))
+                        cost += dist2(p, [A[k] + t * d[k] for k in range(3)])
+                        cost += HYBRID_SPREAD * dd * t * (1 - t)
+                    if best is None or cost < best[0]:
+                        best = (cost, a, b)
+            pairs[cy, cx] = best[1:]
+    return pairs
+
+
+def diffuse(img, pal, kernel, strength=1.0, clamp=None, pairs=None, escape=None):
+    """Serpentine error diffusion: each pixel takes the nearest palette colour (with pairs,
+    the nearer of its cell's two, unless that is more than escape away: then the nearest
+    of all), and passes strength times the error on (each channel clamped to clamp).
+    Returns a "P" image of palette indices."""
+    w, h = img.size
+    src = img.load()
+    buf = [[list(src[x, y]) for x in range(w)] for y in range(h)]
+    out = Image.new("P", (w, h))
+    put = out.load()
+    full = range(len(pal))
+    esc2 = None if escape is None else escape * escape
+    for y in range(h):
+        sgn = 1 if y % 2 == 0 else -1
+        for x in (range(w) if sgn > 0 else range(w - 1, -1, -1)):
+            p = [max(0.0, min(255.0, v)) for v in buf[y][x]]
+            c = nearest(p, pal, pairs[y // 8, x // 8] if pairs else full)
+            if pairs and dist2(p, pal[c]) > esc2:
+                c = nearest(p, pal, full)
+            q = pal[c]
+            put[x, y] = c
+            e = [(p[k] - q[k]) * strength for k in range(3)]
+            if clamp is not None:
+                e = [max(-clamp, min(clamp, v)) for v in e]
+            for dx, dy, f in KERNELS[kernel]:
+                xx, yy = x + dx * sgn, y + dy
+                if 0 <= xx < w and yy < h:
+                    row = buf[yy][xx]
+                    row[0] += e[0] * f
+                    row[1] += e[1] * f
+                    row[2] += e[2] * f
+    return out
+
+
+def convert(img, system, dither, frame=False, box=(MAX_W, MAX_H), chroma=1.0):
+    """dither: (mode, param) from parse_dither. Colours are chosen (and the dither's error
+    measured) against palette(system, chroma); the result has the real colours."""
     size = target_size(img.width, img.height, system, frame, box)
     if size != img.size:
         img = img.resize(size, Image.Resampling.LANCZOS)
-    return img.quantize(palette=palette_image(system), dither=DITHER[dither]).convert("RGB")
+    mode, k = dither
+    pal = palette(system, chroma)
+    if mode == "none" or (mode == "fs" and k == 1.0):
+        d = Image.Dither.NONE if mode == "none" else Image.Dither.FLOYDSTEINBERG
+        out = img.quantize(palette=palette_image(pal), dither=d)
+    elif mode == "hybrid":
+        src = img.load()
+        px = [[src[x, y] for x in range(img.width)] for y in range(img.height)]
+        out = diffuse(img, pal, "fs", clamp=HYBRID_CLAMP,
+                      pairs=cell_pairs(px, img.width, img.height, pal), escape=k)
+    else:
+        out = diffuse(img, pal, mode, strength=k)
+    out.putpalette(palette_image(palette(system)).getpalette())
+    return out.convert("RGB")
+
+
+def parse_chroma(v):
+    """-c S: a number above 0, at most 2."""
+    try:
+        s = float(v)
+    except ValueError:
+        s = -1
+    if not 0 < s <= 2:
+        raise argparse.ArgumentTypeError("%s: takes a number above 0, at most 2" % v)
+    return s
+
+
+def parse_dither(v):
+    """-d MODE[:PARAM]: (mode, param), floydsteinberg as fs."""
+    mode, _, arg = v.lower().partition(":")
+    if mode not in DITHERS:
+        raise argparse.ArgumentTypeError("%s: unknown mode (%s)" % (v, ", ".join(DITHERS)))
+    if DITHERS[mode] is None:
+        if arg:
+            raise argparse.ArgumentTypeError("%s: none takes no parameter" % v)
+        return "none", None
+    default, (lo, hi) = DITHERS[mode]
+    try:
+        k = float(arg) if arg else default
+    except ValueError:
+        raise argparse.ArgumentTypeError("%s: the parameter is a number" % v)
+    if not lo < k <= hi:
+        raise argparse.ArgumentTypeError("%s: the parameter must be above %g, at most %g"
+                                         % (v, lo, hi))
+    return ("fs" if mode == "floydsteinberg" else mode), k
 
 
 def parse_size(v):
@@ -165,8 +317,13 @@ def main():
     ap.add_argument("-b", "--border", action="store_true",
                     help="leave room for the frame the build draws (make FRAME=1): fit "
                          "304x184 instead of 320x200")
-    ap.add_argument("-d", "--dither", default="floydsteinberg", type=str.lower,
-                    choices=sorted(DITHER), help="dithering (default floydsteinberg)")
+    ap.add_argument("-d", "--dither", default="floydsteinberg", type=parse_dither,
+                    metavar="MODE", help="floydsteinberg (default) or fs[:K], atkinson[:K], "
+                                         "hybrid[:E], none")
+    ap.add_argument("-c", "--chroma", type=parse_chroma, default=1.0, metavar="S",
+                    help="match against the colours at S times their saturation (default "
+                         "1; with -d hybrid, 0.6 suits many photos: warmer colours and fewer "
+                         "pixels the converter cannot place)")
     ap.add_argument("-s", "--size", type=parse_size, default=(MAX_W, MAX_H), metavar="WxH",
                     help="fit WxH instead of 320x200 (multiples of 8)")
     a = ap.parse_args()
@@ -190,7 +347,7 @@ def main():
         except (OSError, Image.UnidentifiedImageError) as e:
             raise SystemExit("img2c64: %s" % e)
         for _, dst, system in (j for j in jobs if j[0] == src):
-            out = convert(img, system, a.dither, a.border, a.size)
+            out = convert(img, system, a.dither, a.border, a.size, a.chroma)
             out.save(dst, icc_profile=SRGB_ICC)
             print("%s -> %s (%dx%d%s)" % (src, dst, out.width, out.height,
                                           ", " + system.upper() if system else ""))

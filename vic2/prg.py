@@ -1,11 +1,11 @@
 """One picture -> one standalone PRG that shows it on PAL and NTSC C64s.
 
-usage: python3 -m vic2.prg [-o OUT.prg] [-d {floydsteinberg,none}] [-s WxH] [--force]
+usage: python3 -m vic2.prg [-o OUT.prg] [-d MODE] [-c S] [-s WxH] [--force]
                           [--verify] [--run [pal|ntsc]] PICTURE
 
 The picture (any format tools/img2c64.py reads) is quantised by img2c64 (Colodore as VICE
-shows it, each system's pixel aspect, no room for a frame; -d and -s go to img2c64:
-Floyd-Steinberg unless -d none, fitted into 320x200 unless -s WxH) into
+shows it, each system's pixel aspect, no room for a frame; -d, -c and -s go to img2c64:
+Floyd-Steinberg unless -d names another mode, fitted into 320x200 unless -s WxH) into
 build/prg/<name>-p.png and <name>-n.png, converted for each system (build/prg/pal/,
 build/prg/ntsc/, cached like the build's conversions) and centred, and assembled into the
 dual v2i demo (asm/v2i-demo.s, DUAL=1): both kernels in one PRG, which picks the one for
@@ -36,9 +36,11 @@ def main():
                                              "NTSC C64s.")
     ap.add_argument("picture")
     ap.add_argument("-o", "--output", help="the PRG to write (default: <name>.prg)")
-    ap.add_argument("-d", "--dither", default="floydsteinberg", type=str.lower,
-                    choices=("floydsteinberg", "none"),
-                    help="dithering (default floydsteinberg)")
+    ap.add_argument("-d", "--dither", default="floydsteinberg", metavar="MODE",
+                    help="dithering for img2c64: floydsteinberg (default), fs:K, atkinson[:K], "
+                         "hybrid[:E] or none")
+    ap.add_argument("-c", "--chroma", metavar="S",
+                    help="img2c64 -c: match against the colours at S times their saturation")
     ap.add_argument("-s", "--size", metavar="WxH",
                     help="fit WxH instead of 320x200 (multiples of 8)")
     ap.add_argument("--force", action="store_true", help="convert even if unchanged")
@@ -52,6 +54,8 @@ def main():
     os.makedirs(PRG_BUILD, exist_ok=True)
     base = os.path.join(PRG_BUILD, name + ".png")   # its -p/-n files are what gets converted
     cmd = [sys.executable, TOOL, "-o", base, "-d", a.dither]
+    if a.chroma:
+        cmd += ["-c", a.chroma]
     if a.size:
         cmd += ["-s", a.size]
     if subprocess.run(cmd + [a.picture]).returncode:

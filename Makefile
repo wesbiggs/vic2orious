@@ -27,7 +27,10 @@ FAST    ?=                      # 1: run-diskshow/-viewer/-d64 load instantly (n
 IMAGE   ?=                      # run-viewer: image name to type at the prompt
 ASK     ?= princess             # run-ask: which ask-<name>.prg
 PIC     ?=                      # prg: any picture -> <name>.prg for PAL and NTSC
-DITHER  ?=                      # prg: none for no dithering (default floydsteinberg)
+DITHER  ?=                      # prg: fs:K, atkinson[:K], hybrid[:E] or none (default
+                                #   floydsteinberg; img2c64 -d)
+CHROMA  ?=                      # prg: S, match against the colours at S times their
+                                #   saturation (img2c64 -c; 0.6 with DITHER=hybrid)
 SIZE    ?=                      # prg: WxH to fit instead of 320x200 (multiples of 8)
 
 # build directories: SYS for the programs with images in them (build/pal/, build/ntsc/),
@@ -138,6 +141,7 @@ run-d64: build
 prg:
 	$(if $(strip $(PIC)),,$(error prg needs PIC=path/to/picture))
 	$(PYTHON) -m vic2.prg $(if $(strip $(DITHER)),-d $(strip $(DITHER))) \
+		$(if $(strip $(CHROMA)),-c $(strip $(CHROMA))) \
 		$(if $(strip $(SIZE)),-s $(strip $(SIZE))) $(strip $(PIC))
 
 clean:
@@ -160,8 +164,9 @@ help:
 	@echo "                    C64 wraps and scrolls them; space returns)"
 	@echo "make run-d64        boot the disk (.d64, or .d81 when the images need it)"
 	@echo "make prg PIC=x.png  one picture -> x.prg here, for PAL and NTSC (img2c64,"
-	@echo "                    convert, dual v2i demo; python3 -m vic2.prg); DITHER=none,"
-	@echo "                    SIZE=WxH (fit that instead of 320x200)"
+	@echo "                    convert, dual v2i demo; python3 -m vic2.prg); DITHER=none|"
+	@echo "                    fs:K|atkinson[:K]|hybrid[:E], CHROMA=S (e.g. DITHER=hybrid"
+	@echo "                    CHROMA=0.6), SIZE=WxH (fit that instead of 320x200)"
 	@echo "make clean          remove build/ (PAL, NTSC and dual builds)"
 	@echo "options: IMAGES='input/a.png ...' FRAME=1 AT=COLUMN,ROW LEADING=n AUTO=n HOLD=n DISK=d64|d81"
 	@echo "         FONT=fonts/NAME.cvt[:SIZE] (GEOS font for the texts; bring your own)"

@@ -49,8 +49,21 @@ python3 tools/img2c64.py art.png -a none -o input/art.png   # as is, no stretch,
 - `-o` takes a file name (default `out.png`) or a directory (one that exists, or a path
   ending in `/`), where each picture keeps its name with a `.png` extension. Several
   inputs or a glob pattern need a directory.
-- `-d none` turns off dithering. The default, `-d floydsteinberg`, often looks better on
-  photos, but dithered images are harder to convert exactly, so try both.
+- `-d` picks the dithering. The default, `-d floydsteinberg`, often looks best on
+  photos, but its scattered pixels are hard to convert exactly (often 10-15% wrong);
+  `-d none` converts almost exactly but looks flat. In between:
+  - `-d hybrid[:E]` dithers each 8x8 cell between its best pair of colours, and only
+    leaves them where the pair is more than E (default 90; lower: more colours and
+    more wrong pixels) off. The best trade on photos, especially with `-c 0.6`.
+  - `-d fs:K` passes on only K (0-1) of the error, e.g. `fs:0.5`.
+  - `-d atkinson[:K]`, Atkinson's dither (flatter midtones), e.g. `atkinson:0.75`.
+
+  On a 320x168 photo: Floyd-Steinberg 15% wrong pixels, `fs:0.5` 4%, `atkinson:0.75`
+  5%, `hybrid` 3%, `hybrid -c 0.6` 2%, none 0.2%.
+- `-c S` chooses the colours as if the palette had S times its saturation (the output
+  keeps the real colours). The C64's colours are far more saturated than most photos,
+  so at 1 their browns, reds and blues fall to grey. With `-d hybrid`, `-c 0.6` gives
+  warmer colours and fewer wrong pixels; with the other modes it adds wrong pixels.
 - For a frame around the picture, don't draw one into the image: build with
   `make FRAME=1`, and the C64 draws it. Add `-b` here so the picture leaves room for it
   (it fits 304x184 instead of 320x200: one character cell on each side).
@@ -60,15 +73,17 @@ python3 tools/img2c64.py art.png -a none -o input/art.png   # as is, no stretch,
 ### One picture, one PRG
 
 `vic2.prg` does all of it for a single picture: img2c64 (both aspects, Colodore, no
-frame; Floyd-Steinberg unless `-d none`, up to 320x200 unless `-s WxH`), the conversion for PAL and NTSC (centred), and the
+frame; Floyd-Steinberg unless `-d` names another mode, `-c` as above, up to 320x200 unless `-s WxH`), the conversion for PAL and NTSC (centred), and the
 v2i demo with both kernels, which shows the version for the machine until space:
 
 ```bash
 python3 -m vic2.prg /path/to/my_image.png               # my_image.prg in this directory
 python3 -m vic2.prg photo.jpg -o out/photo.prg --verify  # check both in VICE
 python3 -m vic2.prg logo.png -d none -s 160x96          # no dithering, at most 160x96
+python3 -m vic2.prg photo.jpg -d hybrid -c 0.6          # fewer wrong pixels on photos
 make prg PIC=/path/to/my_image.png                       # the same as the first
 make prg PIC=logo.png DITHER=none SIZE=160x96            # and the third
+make prg PIC=photo.jpg DITHER=hybrid CHROMA=0.6           # and the fourth
 ```
 
 Its files go to `build/prg/` (`<name>-p.png`, `<name>-n.png`, and the conversions in

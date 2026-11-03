@@ -31,7 +31,7 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   img2c64 (`-d`, `-s` passed on, else its defaults) into `build/prg/<name>-p/-n.png`, converts each (centred) into
   `build/prg/pal|ntsc/` (sets `build.BUILD` itself, cached as in the build) and assembles
   `v2i-demo.s` with `DUAL=1`. `--verify` checks both in VICE, `--run [pal|ntsc]`;
-  `make prg PIC=path [DITHER=none] [SIZE=WxH]`.
+  `make prg PIC=path [DITHER=mode] [CHROMA=S] [SIZE=WxH]`.
 - `vic2/screen.py`: Python model of the screen as the library's text/clear routines leave
   it (used by `--verify`). `vic2/ask.py`: `.ask` parsing, layout and model for the demo.
 - `vic2/font.py`: proportional fonts as GEOS point-size records: the default derived from
@@ -59,7 +59,12 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   alpha onto black; `-a both|pal|ntsc|none` (default both) stretches the width by 1/PAR
   (PAL 0.936, NTSC 0.75) and writes `-p`/`-n` files; then fits 320x200 (or `-s WxH`,
   multiples of 8) and rounds to multiples of 8. `-o FILE` or `-o DIR/` (keeps input names, takes several files / glob
-  patterns), `-d floydsteinberg|none`. Refuses to overwrite its input. `-b` only leaves
+  patterns), `-d floydsteinberg|none` (Pillow's) or `fs:K|atkinson[:K]|hybrid[:E]`
+  (`diffuse`: own serpentine error diffusion, pure Python; hybrid picks each cell's pair
+  with `cell_pairs`, segment distance plus a spread penalty as in Yliluoma, and leaves the
+  pair only beyond RGB distance E), `-c S` (colours are chosen against `palette(system,
+  S)`, the palette moved towards its luma, then written with the real ones; helps hybrid,
+  hurts the others). Defaults give byte-identical files to before. Refuses to overwrite its input. `-b` only leaves
   room for the frame `v2i_frame` draws (`build -b`): fits 304x184. (Its old `-b` drew the
   frame into the pixels, which did not always convert exactly.)
 - `fonts/`: GEOS fonts in Convert format for `--font` (gitignored: third party fonts are
@@ -302,6 +307,16 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   failed (the first frame has none; the sync then lands wrong, no block starts, so the
   next frame has none either: a stable state without sprites). Tracking hypotheses for
   both cases spread them ~60 cycles and the sync ran to line 86. Entry on line 9 fixed it.
+
+- Dithering (Nov 2026, IMG_1639 320x168 PAL, wrong pixels / 3x3-blurred RMS error vs
+  the source): F-S 15% / 12.1, none 0.2% / 24.0, fs:0.5 4.1% / 15.2, atkinson:0.75 4.8% /
+  14.7, F-S with error clamped to 24 5.1% / 14.5, hybrid 3.3% / 15.1 (with `-c 0.6` 2.0%,
+  and visibly warmer). Dropped: Yliluoma-style pattern dither over the whole palette (9.5%,
+  no better looking); ordered (Bayer) dither between each cell's pair (0% wrong, but the
+  cell edges look jagged); saturating the picture instead of desaturating the palette
+  (more wrong pixels for the same colour); greens stay rare (Colodore's are far brighter
+  than foliage). F-S at 0.75 hit a converter failure (`fit_line` raising
+  `SchedFail(None, None)` when a Y restart task is left to a badline's only cycle).
 
 ## Ideas not done yet
 
