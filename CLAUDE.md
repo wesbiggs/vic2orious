@@ -27,6 +27,11 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   D64 (or D81), and optionally verifies in VICE, all in one build directory per video
   system: `build/pal/`, `build/ntsc/` (`build/dual/` for the dual disk). The file formats
   are documented in its docstring.
+- `vic2/prg.py`: one picture -> `<name>.prg` (cwd, or `-o`) for PAL and NTSC: runs
+  img2c64 (defaults) into `build/prg/<name>-p/-n.png`, converts each (centred) into
+  `build/prg/pal|ntsc/` (sets `build.BUILD` itself, cached as in the build) and assembles
+  `v2i-demo.s` with `DUAL=1`. `--verify` checks both in VICE, `--run [pal|ntsc]`;
+  `make prg PIC=path`.
 - `vic2/screen.py`: Python model of the screen as the library's text/clear routines leave
   it (used by `--verify`). `vic2/ask.py`: `.ask` parsing, layout and model for the demo.
 - `vic2/font.py`: proportional fonts as GEOS point-size records: the default derived from
@@ -48,7 +53,8 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 - `docs/`: `v2i-format.md`, `v2t-format.md` (incl. the font), `v2i-lib.md`, `v2t-lib.md`.
   Keep them in sync with the code.
 - `tools/img2c64.py` (was `png2c64.py`): the user's quantiser (any picture -> PNG in
-  Colodore as VICE shows it by default, its PAL or NTSC rendering per file, tagged sRGB).
+  Colodore as VICE shows it by default, its PAL or NTSC rendering per file, tagged sRGB;
+  the profile's creation date is zeroed so the same input gives the same file, for the cache).
   Converts the input's ICC profile to sRGB, EXIF orientation,
   alpha onto black; `-a both|pal|ntsc|none` (default both) stretches the width by 1/PAR
   (PAL 0.936, NTSC 0.75) and writes `-p`/`-n` files; then fits 320x200 and rounds to

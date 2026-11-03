@@ -68,7 +68,10 @@ MAX_W, MAX_H = 320, 200
 FRAME = 16                      # -b: a cell of frame on each side
 
 SRGB = ImageCms.createProfile("sRGB")
+# without the creation date (header bytes 24-35), so the same picture gives the same file
+# (the build's conversion cache hashes it)
 SRGB_ICC = ImageCms.ImageCmsProfile(SRGB).tobytes()
+SRGB_ICC = SRGB_ICC[:24] + bytes(12) + SRGB_ICC[36:]
 
 
 def palette_image(system):

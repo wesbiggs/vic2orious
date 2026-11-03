@@ -26,6 +26,7 @@ FAST    ?=                      # 1: run-diskshow/-viewer/-d64 load instantly (n
                                 #    emulation; VICE handles the KERNAL's disk calls)
 IMAGE   ?=                      # run-viewer: image name to type at the prompt
 ASK     ?= princess             # run-ask: which ask-<name>.prg
+PIC     ?=                      # prg: any picture -> <name>.prg for PAL and NTSC
 
 # build directories: SYS for the programs with images in them (build/pal/, build/ntsc/),
 # B for the disk with diskshow and viewer (build/dual/ with DUAL=1); VICE's video system
@@ -67,7 +68,7 @@ DRIVE    = $$(test -e $(B)/vic2orious.d81 && echo -drive8type 1581) \
            $(if $(strip $(FAST)),+drive8truedrive -trapdevice8)
 
 .PHONY: all build convert verify run run-slideshow run-diskshow run-viewer run-ask run-v2i \
-        run-v2t run-scroll run-stream run-d64 clean help FORCE
+        run-v2t run-scroll run-stream run-d64 prg clean help FORCE
 
 all: build
 
@@ -131,6 +132,11 @@ run-stream: build
 run-d64: build
 	$(VICE) $(DRIVE) -autostart $(DISKIMG)
 
+# one picture (PIC=path) -> <name>.prg here, both kernels in it (python3 -m vic2.prg)
+prg:
+	$(if $(strip $(PIC)),,$(error prg needs PIC=path/to/picture))
+	$(PYTHON) -m vic2.prg $(strip $(PIC))
+
 clean:
 	rm -rf build
 
@@ -150,6 +156,8 @@ help:
 	@echo "make run-stream     run the stream demo (the stories arrive as a byte stream, the"
 	@echo "                    C64 wraps and scrolls them; space returns)"
 	@echo "make run-d64        boot the disk (.d64, or .d81 when the images need it)"
+	@echo "make prg PIC=x.png  one picture -> x.prg here, for PAL and NTSC (img2c64,"
+	@echo "                    convert, dual v2i demo; python3 -m vic2.prg)"
 	@echo "make clean          remove build/ (PAL, NTSC and dual builds)"
 	@echo "options: IMAGES='input/a.png ...' FRAME=1 AT=COLUMN,ROW LEADING=n AUTO=n HOLD=n DISK=d64|d81"
 	@echo "         FONT=fonts/NAME.cvt[:SIZE] (GEOS font for the texts; bring your own)"

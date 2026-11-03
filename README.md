@@ -55,6 +55,23 @@ python3 tools/img2c64.py art.png -a none -o input/art.png   # as is, no stretch,
   `make FRAME=1`, and the C64 draws it. Add `-b` here so the picture leaves room for it
   (it fits 304x184 instead of 320x200: one character cell on each side).
 
+### One picture, one PRG
+
+`vic2.prg` does all of it for a single picture: img2c64 with its defaults (both aspects,
+Colodore, Floyd-Steinberg, no frame), the conversion for PAL and NTSC (centred), and the
+v2i demo with both kernels, which shows the version for the machine until space:
+
+```bash
+python3 -m vic2.prg /path/to/my_image.png               # my_image.prg in this directory
+python3 -m vic2.prg photo.jpg -o out/photo.prg --verify  # check both in VICE
+make prg PIC=/path/to/my_image.png                       # the same
+```
+
+Its files go to `build/prg/` (`<name>-p.png`, `<name>-n.png`, and the conversions in
+`pal/` and `ntsc/`, reused while the picture is unchanged; `--force` converts again).
+`--run` (or `--run ntsc`) starts it in VICE. Both images have to fit in one PRG
+(`$0801-$bfff`, about 46K together).
+
 ## 2. Add a story (optional)
 
 Put the text in `input/<name>.txt`: paragraphs separated by blank lines, a first line
