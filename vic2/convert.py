@@ -413,7 +413,7 @@ class Converter:
             # the last line also schedules the sprites off write in the line below
             until = r + 1 if y == g.h - 1 else r
             dropped, cfg, first_cfg, last_use, rows = self.fit_line(
-                sch, spans, state, snap, fixed.get(r, []), r, until, y, fut)
+                sch, spans, state, snap, fixed.get(r, []), fixed.get(until + 1, []), r, until, y, fut)
             wrong += self.recover(y, r, rowpairs, rows, cfg, last_use)
             if dropped:
                 why = (why + "; " if why else "") + "dropped %d span(s) for timing" % len(dropped)
@@ -421,25 +421,28 @@ class Converter:
             prev_spans = spans
         return wrong, cfg, first_cfg, last_use, prev_spans, lines
 
-    def fit_line(self, sch, spans, state, snap, fixed, r, until, y, fut):
+    def fit_line(self, sch, spans, state, snap, fixed, nxt, r, until, y, fut):
         """Schedule one line, dropping spans until its writes fit. Best-first search over the
         sets of dropped spans (fewest lost pixels first, at most FIT_TRIES schedules), then
-        greedy: keep dropping the span whose write missed, else the smallest retasked one."""
+        greedy: keep dropping the span whose write missed, else the smallest retasked one.
+        The pending writes and the next line's fixed ones (nxt) must fit that line too,
+        so a write EDF put off to its deadline does not miss it there (Y restarts, added
+        21 lines early, met their block's pointer write on the one free cycle of a badline)."""
         def attempt(dropped, rewind):
             cfg, first_cfg, last_use = (list(v) for v in state)
             live = [sp for sp in spans if sp not in dropped]
             assign = self.assign(live, cfg, last_use, r, fut)
             tasks, rows, owner = self.line_tasks(sch, assign, cfg, first_cfg, last_use, r, y)
             try:
-                sch.add(tasks + fixed, until, rewind)
+                sch.add(tasks + fixed + (nxt if ahead else []), until, rewind, ahead)
                 return (cfg, first_cfg, last_use, rows), None, None
             except SchedFail as e:
                 sch.restore(snap)
                 return None, owner.get(e.task.id), set(owner.values())
 
-        for rewind in (True, False):
-            # an already committed write may no longer fit when the previous lines are
-            # rescheduled: then keep them as they are
+        # an already committed write may no longer fit when the previous lines are
+        # rescheduled: then keep them as they are; without the look ahead last
+        for rewind, ahead in ((True, 1), (False, 1), (True, 0), (False, 0)):
             heap = [(0, False, ())]
             seen = {()}
             tries = 0

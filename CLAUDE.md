@@ -123,6 +123,13 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   `ok_after`/`_can_meet` guard every emitted instruction.
 - Y restart tasks are added 21 lines early (`fixed[B - 21]`) so EDF fills idle time with
   them; adding them at their deadline caused failures on 200-line images.
+- Look ahead: each line is scheduled one line further (`Scheduler.add(ahead=1)`, that
+  part dropped again) with the next line's fixed tasks (`fit_line`'s `nxt`). In an image
+  with no idle cycles EDF puts a Y restart off to its deadline, which on a badline is
+  cycle 12, the only cycle its block's pointer write has too: without the look ahead the
+  clash showed only when the lines that could drop spans for it were done, and the line
+  failed outright (a Floyd-Steinberg dithered 320x168 image). Without the look ahead is
+  still tried last.
 - At the end of the image a timed `$d015 = 0` stops sprites before any new block starts
   without its pointer (otherwise old sprite data repeats below the image). It lands after
   the last line's Y compares, so blocks starting on the line below always start, and

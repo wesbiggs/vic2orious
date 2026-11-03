@@ -132,7 +132,8 @@ class Task:
 
 class SchedFail(Exception):
     def __init__(self, task, t):
-        super().__init__("missed %r at %d:%d" % (task, raster_of(t), cyc_of(t)))
+        at = "" if t is None else " at %d:%d" % (raster_of(t), cyc_of(t))
+        super().__init__("missed %r%s" % (task, at) if task else "no schedule" + at)
         self.task, self.t = task, t
 
 
@@ -252,8 +253,11 @@ class Scheduler:
         self.k.code[:] = code
         self.ck, self.tasks, self.end_state = dict(ck), dict(tasks), end
 
-    def add(self, new_tasks, until_raster, rewind=True):
-        """Add tasks and (re)schedule up to the start of until_raster+1. Raises SchedFail."""
+    def add(self, new_tasks, until_raster, rewind=True, ahead=0):
+        """Add tasks and (re)schedule up to the start of until_raster+1. Raises SchedFail.
+        With ahead, the pending tasks must also fit the next ahead lines (that part of the
+        schedule is dropped again): a task put off to its deadline may collide there with
+        one added later, when the lines that could have made room are already done."""
         for t in new_tasks:
             self._tighten(t)
             if t.hi < t.lo:
@@ -269,7 +273,12 @@ class Scheduler:
             start = cur_line
         while start not in self.ck:
             start -= 1
-        self._run(self.ck[start], T(until_raster + 1, 1))
+        self._run(self.ck[start], T(until_raster + 1 + ahead, 1))
+        if ahead:
+            self.end_state = end = self.ck[until_raster + 1]
+            del self.k.code[end[1]:]
+            for line in [l for l in self.ck if l > until_raster + 1]:
+                del self.ck[line]
 
     def _run(self, state, t_end):
         vic = self.vic
