@@ -25,6 +25,7 @@ PIX_C0 = 13           # cycle in which sprite X coordinate x is drawn = PIX_C0 +
 MARGIN = 1            # extra safety cycles around every pixel edge
 FIT_TRIES = 24        # schedules tried per line before dropping spans greedily
 ROW_WEIGHTS = (150, 40)  # cell colour searches per row: cost of a pixel no span covers
+RETASK = (100, 20)    # row_cost of a sprite retask into the badline / another line
 MAX_W, MAX_H = 320, 200
 D010 = 0xD010         # X high bits of all 8 sprites (one register)
 REG_X = [0xD000 + 2 * s for s in range(8)]
@@ -231,6 +232,8 @@ class Converter:
 
     # ---- cell colour choice for one character row
     def row_cost(self, cy, pairs, prev_spans, lost_px):
+        """Line 0 of a character row is a badline: its writes must fit in the line before,
+        so retasks into it cost more."""
         cost = 0
         prev = prev_spans
         for i in range(8):
@@ -238,7 +241,7 @@ class Converter:
             sp, lost = self.spans_of(y, pairs)
             cost += lost_px * lost + 5 * len(sp)
             if prev is not None:
-                cost += 20 * spans_cost(prev, sp)
+                cost += RETASK[i > 0] * spans_cost(prev, sp)
             prev = sp
         return cost
 
