@@ -67,6 +67,11 @@ v2i_init:
         sta v2i_vic,x
         dex
         bpl :-
+        ldx #V2I_ZP_SIZE-1              ; our zero page is BASIC's ($13 CHANNL, $16
+:       lda V2I_ZP,x                    ; TEMPPT, ...): v2i_exit puts it back
+        sta v2i_savezp,x
+        dex
+        bpl :-
         lda $dd00
         sta v2i_savedd00
         lda $dd02
@@ -149,8 +154,8 @@ v2i_stop:
         sta $d019
         rts
 
-; ---- give the machine back: VIC registers and bank as v2i_init found them, ROMs and the
-; KERNAL's CIA1 timer interrupt on
+; ---- give the machine back: VIC registers, bank and our zero page as v2i_init found
+; them, ROMs and the KERNAL's CIA1 timer interrupt on
 v2i_exit:
         jsr v2i_stop
         lda v2i_savedd02
@@ -171,6 +176,11 @@ v2i_exit:
         sta $d019
         lda v2i_save01
         sta $01
+        ldx #V2I_ZP_SIZE-1              ; (after the last use of v2i_ptr)
+:       lda v2i_savezp,x
+        sta V2I_ZP,x
+        dex
+        bpl :-
         lda #$81                        ; CIA1 timer A interrupt (KERNAL keyboard scan)
         sta $dc0d
         lda $dc0d
@@ -532,6 +542,7 @@ v2i_save01: .byte 0
 v2i_savedd00: .byte 0
 v2i_savedd02: .byte 0
 v2i_vic:   .res $2f
+v2i_savezp: .res V2I_ZP_SIZE
 v2i_fx0:   .byte 0
 v2i_fx1:   .byte 0
 v2i_fy0:   .byte 0

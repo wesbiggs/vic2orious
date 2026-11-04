@@ -14,7 +14,10 @@ and passes `v2i_show` the one that matches `v2i_system`. `asm/slideshow.s`, `asm
 `asm/ask.s` use both libraries.
 
 Zero page: `$02` (used by the kernels; can't be moved) and `V2I_ZP_SIZE` = 13 bytes from
-`V2I_ZP`, default `$10`. Define `V2I_ZP` before the include to move them.
+`V2I_ZP`, default `$10`. Define `V2I_ZP` before the include to move them. The default
+block is BASIC's (`$13` is the current I/O channel, `$16` the temporary string stack
+pointer), so `v2i_init` saves it and `v2i_exit` puts it back: a program started from
+BASIC can return to it with `RTS`.
 
 ## Lifecycle
 
@@ -36,14 +39,14 @@ A/Y = address means A = low byte, Y = high byte. All routines may change A, X an
 
 | routine | input | does |
 |---|---|---|
-| `v2i_init` | | `SEI`, ROMs out (`$01` = `$35`), CIA interrupts off, VIC bank 3, own IRQ/NMI vectors. Saves `$d000-$d02e`, `$dd00`/`$dd02` and `$01` for `v2i_exit`. Detects the video system (`v2i_system`, up to one frame). |
+| `v2i_init` | | `SEI`, ROMs out (`$01` = `$35`), CIA interrupts off, VIC bank 3, own IRQ/NMI vectors. Saves `$d000-$d02e`, `$dd00`/`$dd02`, `$01` and its zero page block for `v2i_exit`. Detects the video system (`v2i_system`, up to one frame). |
 | `v2i_detect` | | Sets `v2i_system` (see below) from the last raster line: up to one frame, interrupts held off meanwhile. Works with the KERNAL on too, before `v2i_init`, for example to pick which file to load. `v2i_init` calls it. |
 | `v2i_show` | A/Y = `.v2i` | Clears `$c000-$feff`, unpacks the image, points the IRQ at its kernel and sets the image info. Only while stopped. C=1: not shown, A = `V2I_ERR_FORMAT` (not a version 3 `.v2i`) or `V2I_ERR_SYSTEM` (the file is for the other video system, or the machine's VIC-II is not supported). |
 | `v2i_errmsg` | A = error | A/Y = a zero-terminated PETSCII message for an error from `v2i_show`, such as "THIS IMAGE IS FOR AN NTSC C64". Print it after `v2i_exit` (KERNAL `CHROUT`). |
 | `v2i_frame` | A = colour | Draws the 4 px frame (white, white, black, white) into the ring of cells around the image, in cell colour A (`$10`: white on black). Does nothing if the ring doesn't fit on the screen. |
 | `v2i_start` | | Border and background black, raster IRQ at line 9 (`V2I_IRQ_LINE`), `CLI`. The image is displayed from the next frame on. |
 | `v2i_stop` | | `SEI`, IRQ off, sprites off, screen blanked. |
-| `v2i_exit` | | `v2i_stop`, then restores what `v2i_init` saved (sprite registers, colours, mode, bank, `$01`), turns the CIA1 timer IRQ back on for the KERNAL, and does a `CLI`. |
+| `v2i_exit` | | `v2i_stop`, then restores what `v2i_init` saved (sprite registers, colours, mode, bank, `$01`, zero page), turns the CIA1 timer IRQ back on for the KERNAL, and does a `CLI`. |
 
 ## Variables
 
