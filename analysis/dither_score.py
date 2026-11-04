@@ -11,7 +11,8 @@ upper left) converts it. Printed per photo:
 What the C64 shows is saved as build/analysis/dither/<photo>_<setting>.png, the resized
 photo as <photo>_photo.png.
 
-A setting is MODE[:K][,c=S][,l=N] (img2c64's -d, -c, -l), e.g. hybrid:90,c=0.6,l=6.
+A setting is MODE[:K][,c=S][,l=N|none] (img2c64's -d, -c, -l), e.g. hybrid:90,c=0.6,l=6; also
+spread=X and clamp=X|none, which replace HYBRID_SPREAD and HYBRID_CLAMP.
 See README.md.
 
     python analysis/dither_score.py SETTING [PHOTO ...]   (default: kodim01, 03, 05, 15, 23)
@@ -39,7 +40,11 @@ mode, *opts = setting.split(",")
 opts = dict(o.split("=") for o in opts)
 dither = img2c64.parse_dither(mode)
 chroma = float(opts.get("c", 1.0))
-runs = int(opts["l"]) if "l" in opts else None
+runs = img2c64.HYBRID_RUNS if "l" not in opts else None if opts["l"] == "none" else int(opts["l"])
+if "spread" in opts:
+    img2c64.HYBRID_SPREAD = float(opts["spread"])
+if "clamp" in opts:
+    img2c64.HYBRID_CLAMP = None if opts["clamp"] == "none" else float(opts["clamp"])
 timing.set_standard("pal")
 OUT = os.path.join(ROOT, "build", "analysis", "dither")
 os.makedirs(OUT, exist_ok=True)
