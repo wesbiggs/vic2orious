@@ -67,6 +67,10 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   hurts the others). Defaults give byte-identical files to before. Refuses to overwrite its input. `-b` only leaves
   room for the frame `v2i_frame` draws (`build -b`): fits 304x184. (Its old `-b` drew the
   frame into the pixels, which did not always convert exactly.)
+- `analysis/`: one-off measurements, not part of the build (`compare.py`: v2i vs AFLI and
+  NUFLI; `spantypes.py`: X-expanded/multicolour spans; `timingloss.py`: wrong pixels by
+  cause; `badline_weight.py`: the `RETASK` badline weight). Inputs and outputs in `build/analysis/`; requirements, invocation and results in
+  its README.
 - `fonts/`: GEOS fonts in Convert format for `--font` (gitignored: third party fonts are
   not committed; the README tells users to bring their own). Tested with a 26 px Old
   English (one size) and NLQ (10-24, several sizes per file).
@@ -324,8 +328,35 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   (more wrong pixels for the same colour); greens stay rare (Colodore's are far brighter
   than foliage). F-S at 0.75 (10% wrong) made `fit_line` fail outright, fixed by
   the look ahead (see How it works).
+- Other converters (Nov 2026; 296 px wide inputs, scored right of the FLI bug columns,
+  wrong pixels vs the source): dragon crop and kodim01/05/23 (`img2c64 -a pal -s 296x200`,
+  F-S and `-d none`). v2i 0.1-3.4% (none, dragon) and 10-12% (F-S); retropixels AFLI
+  (hires FLI, `-r 0 -c rgb`) 1.7-6.1% / 16-17%, which is exactly the AFLI optimum (two
+  most common colours per 8x1), so v2i beats any AFLI picture; pynuvie NUFLI 3-8% /
+  22-28% (its own model, not run in VICE; it dithers on purpose). retropixels' png matched
+  its PRG in VICE (0 differing pixels). Mufflon (Crest's NUFLI converter) and Pixcen are
+  Windows only. NUFLI (fixed sprite columns under FLI every 2 lines) is the nearest
+  relative; no tool found that moves sprites per line like this one.
+- Scripts and tables for the next two items: `analysis/` (its README).
+- X-expanded / multicolour sprite spans (Nov 2026, same images, measured without timing:
+  greedy 8-sprite cover of the converter's leftover pixels, a pair/group painted only
+  where all its pixels have that colour): multicolour (`$d025`/`$d026` per line) took the
+  dragon 1480 -> 1325 and kodim05 none 758 -> 675 (about 10%), nothing on F-S photos
+  (isolated pixels); X-expanded nothing anywhere. Upper bounds before the extra register
+  writes: not worth building. Timing costs more: actual wrong pixels minus the exact
+  timing-free cover were 688-1035 on the F-S photos (12-19% of their wrong pixels), 326 on
+  the dragon.
 
 ## Ideas not done yet
+
+- Timing losses (12-19% of the wrong pixels on F-S photos; `analysis/timingloss.py`,
+  tables in `analysis/README.md`): the first write to miss is an X write for 50-93% of
+  the dropped pixels, and badlines (the first line of every char row, 1 in 8) lose
+  37-60% of them; F-S lines ask 7.5-8.6 writes on average, and lines asking 9+ lose
+  most. Done: `row_cost` charges a retask into the badline line 100 instead of 20
+  (`RETASK`; its writes must fit in the line before): 1.7% fewer wrong pixels over 11
+  images, 10 better (`analysis/badline_weight.py`). To try: a cover that prefers spans
+  the sprites reach without X writes, `MARGIN = 0`.
 
 - Store the kernel as a compact write list and generate code on load (kernel is about half
   of each image; would fit roughly 6 images per PRG).
