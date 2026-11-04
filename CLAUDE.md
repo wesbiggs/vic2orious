@@ -34,6 +34,10 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   `make prg PIC=path [DITHER=mode] [CHROMA=S] [SIZE=WxH] [LINES=N|none]`.
 - `vic2/info.py`: `python3 -m vic2.info FILE.v2i...` prints a `.v2i`'s header and
   metadata (`build.read_v2i`).
+- `vic2/layers.py`: `build/<system>/<name>_sprites.png`, written with `_compare.png` on
+  every new conversion (not from the cache: `--force` for old ones): bitmap alone, sprite
+  pixels alone, each sprite's windows by number, sprite pixels per cell as a heat map
+  with sprites painting per line (and bad lines) beside it.
 - `vic2/screen.py`: Python model of the screen as the library's text/clear routines leave
   it (used by `--verify`). `vic2/ask.py`: `.ask` parsing, layout and model for the demo.
 - `vic2/font.py`: proportional fonts as GEOS point-size records: the default derived from

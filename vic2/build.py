@@ -37,7 +37,7 @@ import sys
 
 from PIL import Image
 
-from . import convert, timing
+from . import convert, layers, timing
 from . import font as fonts
 from .ask import Ask, NoRoom
 from .palette import load_indexed, save_indexed, PEPTO, nearest, load_vpl, palette_name
@@ -305,6 +305,7 @@ def convert_new(path, name, key, log, frame, at, centre):
     sbs.paste(diff, (2 * (w + 8), 0))
     sbs.resize((sbs.width * 3, sbs.height * 3), Image.NEAREST).save(
         os.path.join(BUILD, "%s_compare.png" % name))
+    layers.sprite_layers(conv, os.path.join(BUILD, "%s_sprites.png" % name))
     meta = {k: v for k, v in info.items() if k not in ("geom", "expected")}
     meta.update(key=key, expected_png=expected_png,
                 geom=dict(col0=g.col0, row0=g.row0, frame=g.frame))

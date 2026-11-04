@@ -173,7 +173,13 @@ for the text; images without one are centred, and so is the image in `v2i-demo.p
 
 For every image the build prints how many lines and pixels could not be reproduced
 exactly, and writes `build/pal/<name>_compare.png` (source | C64 result | wrong pixels in
-red). Outputs, in `build/pal/` (or `build/ntsc/`):
+red) and `build/pal/<name>_sprites.png`, which shows how the sprites are used (top:
+the bitmap alone, the sprite pixels alone; bottom: each sprite's 24 pixel windows in its
+own colour, bright where it paints, and a heat map of sprite pixels per cell with the
+sprites painting on each line beside it, red ticks for lines that are not exact; see
+`vic2/layers.py`). Both are written when an image is converted, not when the build
+reuses a cached conversion (`--force` converts again). Outputs, in `build/pal/` (or
+`build/ntsc/`):
 
 - `slideshow.prg`: the images in one program; space for the next image, otherwise
   they change every 5 seconds. Only 3-4 images fit; with more, it takes the first ones
