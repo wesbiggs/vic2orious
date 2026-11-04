@@ -19,19 +19,21 @@ usage: python3 tools/img2c64.py [-a {both,pal,ntsc,none}] [-b] [-c S] [-d MODE]
                           atkinson:0.75: 5%)
               hybrid:E    each 8x8 cell's best pair of colours, Floyd-Steinberg between
                           them, any colour where the pair is more than E (RGB distance,
-                          default 90: 3%; 80: 6%) off; error clamped to +-32
+                          default 90) off, within the line budget of -l; error clamped
+                          to +-64
   -c S        choose colours as if the palette had S times its saturation (default 1;
               0 < S <= 2); the output still has the real colours. Photos are rarely as
               saturated as the C64's colours: at 1 their reds, browns and blues fall to
-              grey. With -d hybrid it pays: -c 0.6 on IMG_1639 gives warm stone, a blue
-              sky and 2% wrong (3% at 1). With the others it puts more colours in each
+              grey. With -d hybrid it pays: -c 0.6 on IMG_1639 gives warm stone and a blue
+              sky (and slightly fewer wrong pixels). With the others it puts more colours in each
               cell (fs:0.5: 11% wrong instead of 4%, none: 5% instead of 0.2%).
   -s WxH      fit WxH instead of 320x200 (multiples of 8; with -b, also inside 304x184)
   -l N        with -d hybrid: a line's colours outside their cell's pair must fit in at most
-              N single colour runs of 24 pixels (the converter's sprites paint them); a pixel
-              needing one more takes the nearest colour that fits. On 5 Kodak photos (PAL,
-              320 wide): hybrid 1.3% wrong, -l 8 0.6%, -l 6 0.3%, at a slightly higher error
-              against the photo (3x3-blurred RMS 14.5, 14.7, 14.9)
+              N single colour runs of 24 pixels (the converter's sprites paint them; default
+              8, none for no budget); a pixel needing one more takes the nearest colour that
+              fits. On 5 Kodak photos (PAL, 320 wide; wrong pixels after conversion and
+              3x3-blurred RMS error of what the C64 shows against the photo): hybrid 2.4% /
+              13.1, -l 6 1.3% / 13.3, -l none 6.6% / 12.9, Floyd-Steinberg 9.9% / 13.6
 
 Steps: read any format Pillow reads (HEIC too if pillow-heif is installed), apply the EXIF
 orientation, convert from the embedded colour profile to sRGB, flatten transparency onto
@@ -87,8 +89,9 @@ KERNELS = {
     "atkinson": [(1, 0, 1 / 8), (2, 0, 1 / 8), (-1, 1, 1 / 8), (0, 1, 1 / 8), (1, 1, 1 / 8),
                  (0, 2, 1 / 8)],
 }
-HYBRID_CLAMP = 32       # hybrid: carried error per channel at most this
-HYBRID_SPREAD = 0.25    # hybrid: cost of mixing far apart colours when picking a cell's pair
+HYBRID_CLAMP = 64       # hybrid: carried error per channel at most this
+HYBRID_SPREAD = 0.1     # hybrid: cost of mixing far apart colours when picking a cell's pair
+HYBRID_RUNS = 8         # hybrid: default -l
 HYBRID_NEAR = 4         # hybrid: pair candidates are the cell pixels' 4 nearest colours
 SPAN_W = 24             # -l: width of a run of colours outside the cell pair (a sprite)
 
@@ -262,10 +265,11 @@ def diffuse(img, pal, kernel, strength=1.0, clamp=None, pairs=None, escape=None,
     return out
 
 
-def convert(img, system, dither, frame=False, box=(MAX_W, MAX_H), chroma=1.0, runs=None):
+def convert(img, system, dither, frame=False, box=(MAX_W, MAX_H), chroma=1.0,
+            runs=HYBRID_RUNS):
     """dither: (mode, param) from parse_dither. Colours are chosen (and the dither's error
     measured) against palette(system, chroma); the result has the real colours. runs:
-    hybrid's budget per line (see diffuse)."""
+    hybrid's budget per line (see diffuse), None for none."""
     size = target_size(img.width, img.height, system, frame, box)
     if size != img.size:
         img = img.resize(size, Image.Resampling.LANCZOS)
@@ -361,12 +365,22 @@ def main():
                          "pixels the converter cannot place)")
     ap.add_argument("-s", "--size", type=parse_size, default=(MAX_W, MAX_H), metavar="WxH",
                     help="fit WxH instead of 320x200 (multiples of 8)")
-    ap.add_argument("-l", "--line-runs", type=int, metavar="N",
+    ap.add_argument("-l", "--line-runs", metavar="N",
                     help="with -d hybrid: a line's colours outside their cell's pair fit in at "
-                         "most N runs of 24 pixels (the converter has 8 sprites)")
+                         "most N runs of 24 pixels (the converter has 8 sprites; default %d, "
+                         "none for no budget)" % HYBRID_RUNS)
     a = ap.parse_args()
-    if a.line_runs is not None and (a.dither[0] != "hybrid" or not 0 <= a.line_runs <= 8):
-        ap.error("-l takes 0-8 and needs -d hybrid")
+    if a.line_runs is not None:
+        if a.dither[0] != "hybrid":
+            ap.error("-l needs -d hybrid")
+        if a.line_runs == "none":
+            a.line_runs = None
+        elif a.line_runs.isdigit() and int(a.line_runs) <= 8:
+            a.line_runs = int(a.line_runs)
+        else:
+            ap.error("-l takes 0-8 or none")
+    else:
+        a.line_runs = HYBRID_RUNS
     inputs = expand(a.inputs)
     to_dir = os.path.isdir(a.output) or a.output.endswith(("/", os.sep))
     if len(inputs) > 1 and not to_dir:

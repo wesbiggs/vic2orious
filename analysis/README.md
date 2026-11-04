@@ -225,7 +225,7 @@ python analysis/dither_score.py SETTING [PHOTO ...]
 ```
 
 It needs only the build's requirements. The default photos are kodim01, 03, 05, 15 and 23
-from `images/kodak-full/`. A setting is `MODE[:K][,c=S][,l=N]`, which are img2c64's `-d`,
+from `images/kodak-full/`. A setting is `MODE[:K][,c=S][,l=N|none]`, which are img2c64's `-d`,
 `-c` and `-l`; for example, `hybrid:90,c=0.6,l=6`.
 
 For every photo, img2c64 makes the PAL picture (320 wide) and the converter converts it
@@ -239,7 +239,9 @@ For every photo, img2c64 makes the PAL picture (320 wide) and the converter conv
 What the C64 shows is saved as `build/analysis/dither/<photo>_<setting>.png`. A setting
 takes a few seconds per photo, so run settings in parallel, one process each.
 
-Results (Nov 2026), the means over the five photos:
+Results (Nov 2026), the means over the five photos. These were measured with hybrid's
+old defaults (spread 0.25, clamp 32, no budget unless `l=` is given); see below for the
+current ones:
 
 | setting | wrong | rms dith | rms c64 |
 |---|---|---|---|
@@ -269,3 +271,54 @@ Conclusions:
   the blur hides its stray pixels.
 - **`-c 0.6` scores far worse,** because it moves colours on purpose (warmer, more saturated
   looking). RMS against the photo can't judge that; the eye has to.
+
+The parrots' green background goes grey under hybrid, for two reasons:
+
+- **Pair choice:** `cell_pairs` adds `HYBRID_SPREAD` (0.25) times the cost of mixing
+  far-apart colours, so it picks grey pairs over grey/green ones.
+- **Error clamp:** the carried error is clamped to ±`HYBRID_CLAMP` (32), so green error
+  rarely builds up enough to escape the pair.
+
+Loosening both, with the line budget (`spread=` and `clamp=` replace the two constants):
+
+| setting | wrong | rms dith | rms c64 |
+|---|---|---|---|
+| hybrid:90,l=8 | 377 (0.6%) | 14.45 | 14.72 |
+| hybrid:90,l=8,spread=0.1 | 413 (0.6%) | 14.20 | 14.45 |
+| hybrid:90,l=8,spread=0 | 1332 (2.1%) | 17.23 | 17.99 |
+| hybrid:90,l=8,clamp=64 | 1485 (2.3%) | 13.04 | 13.83 |
+| hybrid:90,l=8,clamp=none | 2099 (3.3%) | 14.00 | 14.79 |
+| hybrid:90,l=8,spread=0.1,clamp=64 | 1519 (2.4%) | 12.27 | 13.09 |
+| hybrid:90,l=6,spread=0.1 | 176 (0.3%) | 14.47 | 14.58 |
+| hybrid:90,l=6,clamp=64 | 706 (1.1%) | 13.79 | 14.18 |
+| hybrid:90,l=6,spread=0.1,clamp=64 | 803 (1.3%) | 12.87 | 13.28 |
+| hybrid:90,spread=0.1,clamp=64 | 4198 (6.6%) | 9.73 | 12.87 |
+
+- **`spread=0.1,clamp=64` with `-l 6` or `-l 8`** shows a picture closer to the photo than
+  F-S does (13.28 / 13.09 against 13.59), with a quarter or less of its wrong pixels. The
+  wrong pixels are as many as plain hybrid:90's at `-l 6`, 2.4% at `-l 8`.
+- **On kodim23, the parrots:** 17.09 -> 14.33. Most of the green background comes back.
+  At `-l 6` some 8x8 cells show as blocks of green.
+- **Spread 0 picks pairs too far apart,** and no clamp diffuses too much colour; both are
+  worse.
+
+`spread=0.1,clamp=64,l=8` is hybrid's default since (img2c64 `HYBRID_SPREAD`,
+`HYBRID_CLAMP`, `HYBRID_RUNS`); a setting without `l=` now gets `l=8`, `l=none` turns the
+budget off, and the old hybrid is `hybrid:90,l=none,spread=0.25,clamp=32`. The new defaults
+give the numbers above (2.4%, 13.09). On IMG_1639 (320x200 PAL, a hard one: stone, sky,
+foliage):
+
+| setting | wrong | rms dith | rms c64 |
+|---|---|---|---|
+| fs | 7875 (14.6%) | 7.74 | 14.05 |
+| old hybrid:90 | 1790 (3.3%) | 12.98 | 14.61 |
+| old hybrid:90,l=8 | 724 (1.3%) | 14.77 | 15.44 |
+| hybrid:90 (new default) | 1667 (3.1%) | 13.42 | 14.53 |
+| hybrid:90,l=6 | 838 (1.6%) | 13.85 | 14.38 |
+| hybrid:90,l=none | 6100 (11.3%) | 8.48 | 13.33 |
+| hybrid:90,c=0.6 | 1543 (2.9%) | 17.66 | 18.46 |
+
+- **The new default beats the old hybrid here too,** slightly (14.53 against 14.61, fewer
+  wrong pixels), and the old one with `-l 8` clearly (15.44).
+- **F-S stays closer by RMS on this one** (14.05), and `-l none` closer still (13.33) at
+  11% wrong. `-l 6` is the best of the budgeted settings here.

@@ -64,9 +64,10 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   with `cell_pairs`, segment distance plus a spread penalty as in Yliluoma, and leaves the
   pair only beyond RGB distance E), `-c S` (colours are chosen against `palette(system,
   S)`, the palette moved towards its luma, then written with the real ones; helps hybrid,
-  hurts the others), `-l N` (hybrid: a line's colours outside the cell pairs fit in N
-  runs of 24 px, `runs_needed`; else the nearest colour that fits). Defaults give
-  byte-identical files to before. Refuses to overwrite its input. `-b` only leaves
+  hurts the others), `-l N|none` (hybrid: a line's colours outside the cell pairs fit in N
+  runs of 24 px, `runs_needed`; else the nearest colour that fits; default 8,
+  `HYBRID_RUNS`). Hybrid's defaults (`-l 8`, `HYBRID_SPREAD` 0.1, `HYBRID_CLAMP` 64) changed
+  in Nov 2026; F-S and the others give byte-identical files to before. Refuses to overwrite its input. `-b` only leaves
   room for the frame `v2i_frame` draws (`build -b`): fits 304x184. (Its old `-b` drew the
   frame into the pixels, which did not always convert exactly.)
 - `analysis/`: one-off measurements, not part of the build (`compare.py`: v2i vs AFLI and
@@ -336,9 +337,14 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   `-l 8` 0.6% / 14.72, `-l 6` 0.3% / 14.89, F-S 9.9% / 13.59. The budget makes the C64
   show img2c64's picture almost exactly but does not bring it closer to the photo
   (hybrid's wrong pixels fall back to near colours anyway); a lower `E` with it adds
-  wrong pixels for no RMS. Not the default. Rejected beforehand: capping the colours of
+  wrong pixels for no RMS. Rejected beforehand: capping the colours of
   each 8-line band (F-S photos have only 640-2275 pixels outside each band's top 8
   colours but ~5000 the 8 spans miss: where the colours are matters, not how many).
+- Hybrid's defaults (Nov 2026, same photos): spread 0.25 -> 0.1 and clamp 32 -> 64 with
+  `-l 8` (the parrots' green background had gone grey): 2.4% / 13.09, closer to the photo
+  than F-S with a quarter of its wrong pixels; `-l 6` 1.3% / 13.28 (some cells show as
+  green blocks). Spread 0 or no clamp are worse. On IMG_1639 (the hard one): new default
+  3.1% / 14.53, `-l 6` 1.6% / 14.38, old hybrid 3.3% / 14.61, F-S 14.6% / 14.05.
 - Other converters (Nov 2026; 296 px wide inputs, scored right of the FLI bug columns,
   wrong pixels vs the source): dragon crop and kodim01/05/23 (`img2c64 -a pal -s 296x200`,
   F-S and `-d none`). v2i 0.1-3.4% (none, dragon) and 10-12% (F-S); retropixels AFLI
