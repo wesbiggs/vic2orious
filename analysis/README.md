@@ -214,6 +214,58 @@ minutes. Wrong pixels (Nov 2026):
 | princess | 260 | 258 | 253 | 257 | 279 |
 | total | 24097 | 24061 | 23957 | 23682 | 23684 |
 
-At 100, the total falls 1.7% (415 pixels, about 10% of the timing loss). 10 of 11 images
+At 100, the total falls by 1.7% (415 pixels, about 10% of the timing loss). 10 of 11 images
 are better; gaoler is 7 pixels worse. 200 has the same total but swings more both ways.
 `convert.py` now uses 100 (`RETASK`).
+
+## dither_score.py: img2c64 settings, wrong pixels and error against the photo
+
+```bash
+python analysis/dither_score.py SETTING [PHOTO ...]
+```
+
+It needs only the build's requirements. The default photos are kodim01, 03, 05, 15 and 23
+from `images/kodak-full/`. A setting is `MODE[:K][,c=S][,l=N]`, which are img2c64's `-d`,
+`-c` and `-l`; for example, `hybrid:90,c=0.6,l=6`.
+
+For every photo, img2c64 makes the PAL picture (320 wide) and the converter converts it
+(upper left). The script reports:
+
+- `wrong`: the pixels the converter gets wrong.
+- `rms dith`: the 3x3-blurred RMS error (RGB, 0-255) of img2c64's picture against the photo,
+  resized as img2c64 resizes it.
+- `rms c64`: the same for what the C64 shows.
+
+What the C64 shows is saved as `build/analysis/dither/<photo>_<setting>.png`. A setting
+takes a few seconds per photo, so run settings in parallel, one process each.
+
+Results (Nov 2026), the means over the five photos:
+
+| setting | wrong | rms dith | rms c64 |
+|---|---|---|---|
+| fs | 6365 (9.9%) | 9.10 | 13.59 |
+| none | 315 (0.5%) | 21.85 | 22.02 |
+| hybrid:90 | 801 (1.3%) | 13.84 | 14.46 |
+| hybrid:90,l=8 | 377 (0.6%) | 14.45 | 14.72 |
+| hybrid:90,l=6 | 165 (0.3%) | 14.77 | 14.89 |
+| hybrid:90,l=4 | 52 (0.1%) | 15.21 | 15.24 |
+| hybrid:60,l=6 | 422 (0.7%) | 14.57 | 14.81 |
+| hybrid:40,l=6 | 428 (0.7%) | 14.60 | 14.84 |
+| hybrid:90,c=0.6 | 484 (0.8%) | 18.32 | 18.64 |
+| hybrid:90,c=0.6,l=6 | 119 (0.2%) | 18.80 | 18.89 |
+| hybrid:60,c=0.6,l=6 | 551 (0.9%) | 18.26 | 18.55 |
+
+Conclusions:
+
+- **The budget (`-l`, two colours a cell plus at most N runs of 24 px a line)** does what
+  it should: wrong pixels drop to a half (`l=8`) or a fifth (`l=6`) of hybrid's.
+- **It doesn't bring the screen closer to the photo.** `rms c64` rises a little (14.46 ->
+  14.72 -> 14.89): hybrid's wrong pixels fall back to a near colour anyway, and the budget
+  gives up colours a converted hybrid picture would have shown.
+- **What it buys is predictability:** the C64 shows almost exactly img2c64's picture.
+- **A lower escape distance `E` with the budget** brings more wrong pixels and no better
+  RMS.
+- **By this measure F-S still shows the closest picture** (13.59), despite 10% wrong pixels:
+  the blur hides its stray pixels.
+- **`-c 0.6` scores far worse,** because it moves colours on purpose (warmer, more saturated
+  looking). RMS against the photo can't judge that; the eye has to.

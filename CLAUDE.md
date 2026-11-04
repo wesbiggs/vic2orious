@@ -64,12 +64,15 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   with `cell_pairs`, segment distance plus a spread penalty as in Yliluoma, and leaves the
   pair only beyond RGB distance E), `-c S` (colours are chosen against `palette(system,
   S)`, the palette moved towards its luma, then written with the real ones; helps hybrid,
-  hurts the others). Defaults give byte-identical files to before. Refuses to overwrite its input. `-b` only leaves
+  hurts the others), `-l N` (hybrid: a line's colours outside the cell pairs fit in N
+  runs of 24 px, `runs_needed`; else the nearest colour that fits). Defaults give
+  byte-identical files to before. Refuses to overwrite its input. `-b` only leaves
   room for the frame `v2i_frame` draws (`build -b`): fits 304x184. (Its old `-b` drew the
   frame into the pixels, which did not always convert exactly.)
 - `analysis/`: one-off measurements, not part of the build (`compare.py`: v2i vs AFLI and
   NUFLI; `spantypes.py`: X-expanded/multicolour spans; `timingloss.py`: wrong pixels by
-  cause; `badline_weight.py`: the `RETASK` badline weight). Inputs and outputs in `build/analysis/`; requirements, invocation and results in
+  cause; `badline_weight.py`: the `RETASK` badline weight; `dither_score.py`: img2c64
+  settings by wrong pixels and blurred RMS against the photo). Inputs and outputs in `build/analysis/`; requirements, invocation and results in
   its README.
 - `fonts/`: GEOS fonts in Convert format for `--font` (gitignored: third party fonts are
   not committed; the README tells users to bring their own). Tested with a 26 px Old
@@ -328,6 +331,14 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   (more wrong pixels for the same colour); greens stay rare (Colodore's are far brighter
   than foliage). F-S at 0.75 (10% wrong) made `fit_line` fail outright, fixed by
   the look ahead (see How it works).
+- Line budget for hybrid (`-l`, Nov 2026, 5 Kodak photos 320 wide, `analysis/
+  dither_score.py`; wrong / blurred RMS of what the C64 shows): hybrid 1.3% / 14.46,
+  `-l 8` 0.6% / 14.72, `-l 6` 0.3% / 14.89, F-S 9.9% / 13.59. The budget makes the C64
+  show img2c64's picture almost exactly but does not bring it closer to the photo
+  (hybrid's wrong pixels fall back to near colours anyway); a lower `E` with it adds
+  wrong pixels for no RMS. Not the default. Rejected beforehand: capping the colours of
+  each 8-line band (F-S photos have only 640-2275 pixels outside each band's top 8
+  colours but ~5000 the 8 spans miss: where the colours are matters, not how many).
 - Other converters (Nov 2026; 296 px wide inputs, scored right of the FLI bug columns,
   wrong pixels vs the source): dragon crop and kodim01/05/23 (`img2c64 -a pal -s 296x200`,
   F-S and `-d none`). v2i 0.1-3.4% (none, dragon) and 10-12% (F-S); retropixels AFLI
