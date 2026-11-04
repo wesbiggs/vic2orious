@@ -41,7 +41,9 @@ black; stretch the width so the picture keeps its proportions on that system's T
 pixels are not square: about 0.94 wide on PAL, 0.75 on NTSC); shrink proportionally to fit
 320x200 (or -s WxH) if needed; round both sides to multiples of 8 (the converter needs that); map to
 the palette: Colodore as VICE shows it with its default colour controls (VICE's PAL
-rendering for -p and -a none files, its NTSC one for -n). Pictures are never enlarged beyond the stretch. The output is tagged sRGB.
+rendering for -p and -a none files, its NTSC one for -n). Pictures are never enlarged beyond the stretch. The output is tagged sRGB
+and records the settings (source name, aspect, fit, dither, chroma, palette) in a PNG text
+chunk "vic2orious"; the build copies them into the .v2i's metadata.
 
 For a frame around the image on the C64, build with make FRAME=1 (v2i_frame draws it); -b
 makes sure the picture leaves room for it.
@@ -54,7 +56,7 @@ import io
 import os
 import sys
 
-from PIL import Image, ImageCms, ImageOps
+from PIL import Image, ImageCms, ImageOps, PngImagePlugin
 
 try:
     import pillow_heif
@@ -102,6 +104,7 @@ SUFFIX = {"pal": "-p", "ntsc": "-n", None: ""}
 SYSTEMS = {"both": ["pal", "ntsc"], "pal": ["pal"], "ntsc": ["ntsc"], "none": [None]}
 MAX_W, MAX_H = 320, 200
 FRAME = 16                      # -b: a cell of frame on each side
+TEXT_KEY = "vic2orious"         # PNG text chunk with the settings (see settings)
 
 SRGB = ImageCms.createProfile("sRGB")
 # without the creation date (header bytes 24-35), so the same picture gives the same file
@@ -289,6 +292,41 @@ def convert(img, system, dither, frame=False, box=(MAX_W, MAX_H), chroma=1.0,
     return out.convert("RGB")
 
 
+def settings(src, system, dither, frame=False, box=(MAX_W, MAX_H), chroma=1.0,
+             runs=HYBRID_RUNS):
+    """What convert was given, as "key: value" lines: written into the PNG (text chunk
+    TEXT_KEY), from where the build copies them into the .v2i's metadata."""
+    mode, k = dither
+    if mode == "none":
+        d = "none"
+    elif mode == "fs" and k == 1.0:
+        d = "floydsteinberg (Pillow's)"
+    else:
+        d = "%s:%g" % (mode, k)
+    if mode == "hybrid":
+        d += ", line runs %s, spread %g, clamp %s, pair candidates %d" % (
+            "none" if runs is None else runs, HYBRID_SPREAD,
+            "none" if HYBRID_CLAMP is None else "%g" % HYBRID_CLAMP, HYBRID_NEAR)
+    mw, mh = box
+    if frame:
+        mw, mh = min(mw, MAX_W - FRAME), min(mh, MAX_H - FRAME)
+    lines = [("quantiser", "img2c64"),
+             ("source", os.path.basename(src)),
+             ("aspect", "%s (pixel width %g)" % (system, PAR[system]) if system else "none"),
+             ("fit", "%dx%d%s" % (mw, mh, ", room for a frame" if frame else "")),
+             ("dither", d),
+             ("chroma", "%g" % chroma),
+             ("palette", "Colodore as VICE shows it (%s)" % (system or "pal").upper())]
+    return "".join("%s: %s\n" % kv for kv in lines)
+
+
+def save(out, dst, text):
+    """out as dst: tagged sRGB, with text (settings) in a tEXt chunk."""
+    info = PngImagePlugin.PngInfo()
+    info.add_text(TEXT_KEY, text)
+    out.save(dst, icc_profile=SRGB_ICC, pnginfo=info)
+
+
 def parse_chroma(v):
     """-c S: a number above 0, at most 2."""
     try:
@@ -402,7 +440,8 @@ def main():
             raise SystemExit("img2c64: %s" % e)
         for _, dst, system in (j for j in jobs if j[0] == src):
             out = convert(img, system, a.dither, a.border, a.size, a.chroma, a.line_runs)
-            out.save(dst, icc_profile=SRGB_ICC)
+            save(out, dst, settings(src, system, a.dither, a.border, a.size, a.chroma,
+                                    a.line_runs))
             print("%s -> %s (%dx%d%s)" % (src, dst, out.width, out.height,
                                           ", " + system.upper() if system else ""))
     return 0

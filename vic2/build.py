@@ -40,7 +40,7 @@ from PIL import Image
 from . import convert, timing
 from . import font as fonts
 from .ask import Ask, NoRoom
-from .palette import load_indexed, save_indexed, PEPTO, nearest, load_vpl
+from .palette import load_indexed, save_indexed, PEPTO, nearest, load_vpl, palette_name
 from .screen import Screen
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -75,7 +75,47 @@ def rle_zero(data):
     return out + b"\0\0"
 
 
-CACHE_VERSION = 5             # bump when the .v2i packing below changes
+V2I_META = 1                  # header byte 25 (flags): metadata follows the sprite stream
+META_KEY = "vic2orious"       # PNG text chunk img2c64 writes its settings into
+META_MAX = 1024               # metadata text at most this long
+
+
+def v2i_metadata(path, frame):
+    """The .v2i's metadata text ("key: value" lines, ASCII): img2c64's settings from the
+    PNG's text chunk META_KEY if it has one, then the build's own (the file converted, its
+    palette when img2c64 did not name it, the frame)."""
+    im = Image.open(path)
+    png = getattr(im, "text", {}).get(META_KEY, "")
+    lines = [l.strip() for l in png.splitlines() if ":" in l]
+    keys = {l.split(":")[0] for l in lines}
+    lines.append("image: %s" % os.path.basename(path))
+    if "palette" not in keys:
+        cs = [c for _, c in im.convert("RGB").getcolors(1 << 24)]
+        lines.append("palette: %s" % (palette_name(cs) or "unknown, mapped to nearest Pepto"))
+    lines.append("frame: %s" % ("yes" if frame else "no"))
+    text = "".join(l + "\n" for l in lines)
+    data = "".join(c if " " <= c <= "~" or c == "\n" else "?" for c in text).encode("ascii")
+    return data[:META_MAX]
+
+
+def read_v2i(path):
+    """A .v2i file (with its load address) -> (header fields as a dict, metadata text or
+    None)."""
+    with open(path, "rb") as f:
+        d = f.read()[2:]
+    assert d[:3] == b"V2I", "%s: not a .v2i file" % path
+    w = lambda o: int.from_bytes(d[o:o + 2], "little")
+    hdr = dict(version=d[3], cols=d[4], rows=d[5], col0=d[6], row0=d[7], kernel=w(8),
+               bitmap=w(10), screen=w(12), sprites=w(14), bad_lines=w(20), wrong_px=w(22),
+               system=d[24] if d[3] >= 2 else 0, flags=d[25] if d[3] >= 2 else 0)
+    meta = None
+    if hdr["flags"] & V2I_META:
+        o = 26 + hdr["kernel"] + hdr["bitmap"] + hdr["screen"] + hdr["sprites"]
+        meta = d[o + 2:o + 2 + w(o)].decode("ascii")
+    return hdr, meta
+
+
+CACHE_VERSION = 6             # bump when the .v2i packing below changes
 CACHE_SOURCES = ("convert.py", "timing.py", "palette.py")
 
 
@@ -240,8 +280,10 @@ def convert_new(path, name, key, log, frame, at, centre):
     for v in [len(d) for d in packed] + [0xE000 + 320 * g.row0, 0xC000 + 40 * g.row0,
                                          len(bad_lines), min(wrong_px, 0xFFFF)]:
         hdr += v.to_bytes(2, "little")
-    hdr += bytes((timing.SYSTEM_ID[timing.STANDARD], 0))
+    hdr += bytes((timing.SYSTEM_ID[timing.STANDARD], V2I_META))
     assert len(hdr) == 26
+    meta = v2i_metadata(path, frame)
+    packed.append(len(meta).to_bytes(2, "little") + meta)
     assert len(hdr) + sum(len(d) for d in packed) <= 0x9800 - PLAYER_BUF, \
         "%s: .v2i too big for the players' buffer ($%04x-$97ff)" % (name, PLAYER_BUF)
     v2i = os.path.join(BUILD, name + ".v2i")

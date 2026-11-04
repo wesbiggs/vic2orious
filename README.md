@@ -60,6 +60,11 @@ python3 tools/img2c64.py art.png -a none -o input/art.png   # as is, no stretch,
 
   On a 320x168 photo: Floyd-Steinberg 15% wrong pixels, `fs:0.5` 4%, `atkinson:0.75`
   5%, `hybrid` 3%, `hybrid -c 0.6` 2%, none 0.2%.
+- `-l N|none` (with `-d hybrid`) is a budget per line: the colours outside each cell's
+  pair have to fit in N runs of 24 pixels (default 8, one per sprite); a pixel needing
+  more takes the nearest colour that fits. It makes the C64 show the picture almost
+  exactly, but where many pixels hit it (stone, foliage), whole areas can fall to grey;
+  `-l none` turns it off (more wrong pixels, fuller colour).
 - `-c S` chooses the colours as if the palette had S times its saturation (the output
   keeps the real colours). The C64's colours are far more saturated than most photos,
   so at 1 their browns, reds and blues fall to grey. With `-d hybrid`, `-c 0.6` gives
@@ -73,7 +78,7 @@ python3 tools/img2c64.py art.png -a none -o input/art.png   # as is, no stretch,
 ### One picture, one PRG
 
 `vic2.prg` does all of it for a single picture: img2c64 (both aspects, Colodore, no
-frame; Floyd-Steinberg unless `-d` names another mode, `-c` as above, up to 320x200 unless `-s WxH`), the conversion for PAL and NTSC (centred), and the
+frame; Floyd-Steinberg unless `-d` names another mode, `-c` and `-l` as above, up to 320x200 unless `-s WxH`), the conversion for PAL and NTSC (centred), and the
 v2i demo with both kernels, which shows the version for the machine until space:
 
 ```bash
@@ -84,6 +89,7 @@ python3 -m vic2.prg photo.jpg -d hybrid -c 0.6          # fewer wrong pixels on 
 make prg PIC=/path/to/my_image.png                       # the same as the first
 make prg PIC=logo.png DITHER=none SIZE=160x96            # and the third
 make prg PIC=photo.jpg DITHER=hybrid CHROMA=0.6           # and the fourth
+make prg PIC=photo.jpg DITHER=hybrid LINES=none           # hybrid without its line budget
 ```
 
 Its files go to `build/prg/` (`<name>-p.png`, `<name>-n.png`, and the conversions in

@@ -31,11 +31,48 @@ All words are little endian. Offsets are from the start of the data, after the P
 | 20 | 2 | number of image lines that are not pixel perfect (information only) |
 | 22 | 2 | number of image pixels that are not pixel perfect (information only) |
 | 24 | 1 | video system the kernel is made for: 0 PAL (6569/8565, 63 cycles x 312 lines), 1 NTSC (6567R8/8562, 65 cycles x 263 lines) |
-| 25 | 1 | reserved, 0 |
-| 26 | ... | kernel, then the bitmap, screen and sprite streams, back to back |
+| 25 | 1 | flags: bit 0 set if metadata follows the sprite stream; other bits 0 |
+| 26 | ... | kernel, then the bitmap, screen and sprite streams, back to back, then the metadata if bit 0 of byte 25 is set |
 
 Version 2 kernels were entered on raster line 2 (same layout). Version 1 had no video
-system byte (always PAL) and a 24-byte header.
+system byte (always PAL) and a 24-byte header. Byte 25 was always 0 before metadata was
+added (Nov 2026); players don't read it or anything after the sprite stream, so files
+with and without metadata work with every version 3 player.
+
+## Metadata
+
+Information only: the settings the image was made with that the rest of the file does
+not record. A 2-byte length n (at most 1024), then n bytes of text: ASCII lines of the
+form `key: value`, each ending in `$0a` (line feed, not PETSCII). Keys are lower case;
+readers should ignore keys they don't know. The build writes, in this order:
+
+- What `tools/img2c64.py` recorded in the PNG (a `tEXt` chunk with keyword
+  `vic2orious`, copied line by line), if the picture came from it: `quantiser`
+  (`img2c64`), `source` (the input picture's file name), `aspect` (`pal`, `ntsc` or
+  `none`, with the pixel width), `fit` (the box, `WxH`), `dither` (mode and parameter;
+  for hybrid also its line runs, spread, clamp and pair candidates), `chroma` and
+  `palette`.
+- `image`: the PNG file that was converted.
+- `palette`, if img2c64 named none: the known palette that holds all the PNG's colours
+  (Pepto, Colodore, or Colodore as VICE shows it, PAL or NTSC), or `unknown, mapped to
+  nearest Pepto`.
+- `frame`: `yes` if the build draws a frame around it (`build -b`), else `no`.
+
+For example:
+
+```
+quantiser: img2c64
+source: IMG_1639.png
+aspect: pal (pixel width 0.936)
+fit: 320x200
+dither: hybrid:90, line runs none, spread 0.1, clamp 64, pair candidates 4
+chroma: 1
+palette: Colodore as VICE shows it (PAL)
+image: IMG_1639-p.png
+frame: no
+```
+
+`python3 -m vic2.info FILE.v2i` prints the header and the metadata.
 
 ## Streams
 

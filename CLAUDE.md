@@ -28,10 +28,12 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   system: `build/pal/`, `build/ntsc/` (`build/dual/` for the dual disk). The file formats
   are documented in its docstring.
 - `vic2/prg.py`: one picture -> `<name>.prg` (cwd, or `-o`) for PAL and NTSC: runs
-  img2c64 (`-d`, `-s` passed on, else its defaults) into `build/prg/<name>-p/-n.png`, converts each (centred) into
+  img2c64 (`-d`, `-c`, `-s`, `-l` passed on, else its defaults) into `build/prg/<name>-p/-n.png`, converts each (centred) into
   `build/prg/pal|ntsc/` (sets `build.BUILD` itself, cached as in the build) and assembles
   `v2i-demo.s` with `DUAL=1`. `--verify` checks both in VICE, `--run [pal|ntsc]`;
-  `make prg PIC=path [DITHER=mode] [CHROMA=S] [SIZE=WxH]`.
+  `make prg PIC=path [DITHER=mode] [CHROMA=S] [SIZE=WxH] [LINES=N|none]`.
+- `vic2/info.py`: `python3 -m vic2.info FILE.v2i...` prints a `.v2i`'s header and
+  metadata (`build.read_v2i`).
 - `vic2/screen.py`: Python model of the screen as the library's text/clear routines leave
   it (used by `--verify`). `vic2/ask.py`: `.ask` parsing, layout and model for the demo.
 - `vic2/font.py`: proportional fonts as GEOS point-size records: the default derived from
@@ -67,7 +69,9 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   hurts the others), `-l N|none` (hybrid: a line's colours outside the cell pairs fit in N
   runs of 24 px, `runs_needed`; else the nearest colour that fits; default 8,
   `HYBRID_RUNS`). Hybrid's defaults (`-l 8`, `HYBRID_SPREAD` 0.1, `HYBRID_CLAMP` 64) changed
-  in Nov 2026; F-S and the others give byte-identical files to before. Refuses to overwrite its input. `-b` only leaves
+  in Nov 2026. Each output PNG records the settings (`settings`: source name, aspect,
+  fit, dither with hybrid's constants, chroma, palette) in a `tEXt` chunk `vic2orious`
+  (`TEXT_KEY`), which the build copies into the `.v2i` metadata. Refuses to overwrite its input. `-b` only leaves
   room for the frame `v2i_frame` draws (`build -b`): fits 304x184. (Its old `-b` drew the
   frame into the pixels, which did not always convert exactly.)
 - `analysis/`: one-off measurements, not part of the build (`compare.py`: v2i vs AFLI and
@@ -254,6 +258,11 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 - After touching `timing.py`, `convert.py`, `v2i.inc` or `v2t.inc`, run `--verify`: every check
   must report `0 differing pixels` (VICE output vs the model). The converter itself reports
   bad lines / wrong pixels vs the source; those are expected to be non-zero.
+- `.v2i` metadata (header byte 25 bit 0, `V2I_META`; text block after the sprite stream,
+  `v2i_metadata`): img2c64's PNG `tEXt` lines plus the build's `image`, `palette` (if
+  img2c64 named none; `palette_name`), `frame`. Players ignore it, so the version stayed
+  3. It is written at conversion, so it is cached with the `.v2i` (the key hashes the
+  PNG, which holds img2c64's text). Settings not in the format go there.
 - `--verify` builds one single-image slideshow per image, with its text, and compares the
   whole screen with a model (`expected_screen`: converter output + `Screen` text model).
   For each `.ask` it builds `ask.s` with `AUTO=n` (picks the last topic, then keeps
@@ -345,6 +354,9 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   than F-S with a quarter of its wrong pixels; `-l 6` 1.3% / 13.28 (some cells show as
   green blocks). Spread 0 or no clamp are worse. On IMG_1639 (the hard one): new default
   3.1% / 14.53, `-l 6` 1.6% / 14.38, old hybrid 3.3% / 14.61, F-S 14.6% / 14.05.
+  But visibly the `-l 8` default turns much of IMG_1639's stone and foliage into flat
+  grey areas (the budget's nearest-colour fallback), which the blurred RMS hardly
+  charges; `-l none` (11.3% wrong) looks like F-S. Judge budget changes by eye too.
 - Other converters (Nov 2026; 296 px wide inputs, scored right of the FLI bug columns,
   wrong pixels vs the source): dragon crop and kodim01/05/23 (`img2c64 -a pal -s 296x200`,
   F-S and `-d none`). v2i 0.1-3.4% (none, dragon) and 10-12% (F-S); retropixels AFLI

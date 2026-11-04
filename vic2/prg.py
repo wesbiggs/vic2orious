@@ -1,10 +1,12 @@
 """One picture -> one standalone PRG that shows it on PAL and NTSC C64s.
 
-usage: python3 -m vic2.prg [-o OUT.prg] [-d MODE] [-c S] [-s WxH] [--force]
+usage: python3 -m vic2.prg [-o OUT.prg] [-d MODE] [-c S] [-s WxH] [-l N|none]
+                          [--force]
                           [--verify] [--run [pal|ntsc]] PICTURE
 
 The picture (any format tools/img2c64.py reads) is quantised by img2c64 (Colodore as VICE
-shows it, each system's pixel aspect, no room for a frame; -d, -c and -s go to img2c64:
+shows it, each system's pixel aspect, no room for a frame; -d, -c, -s and -l go to
+img2c64:
 Floyd-Steinberg unless -d names another mode, fitted into 320x200 unless -s WxH) into
 build/prg/<name>-p.png and <name>-n.png, converted for each system (build/prg/pal/,
 build/prg/ntsc/, cached like the build's conversions) and centred, and assembled into the
@@ -43,6 +45,9 @@ def main():
                     help="img2c64 -c: match against the colours at S times their saturation")
     ap.add_argument("-s", "--size", metavar="WxH",
                     help="fit WxH instead of 320x200 (multiples of 8)")
+    ap.add_argument("-l", "--line-runs", metavar="N",
+                    help="img2c64 -l, with -d hybrid: a line's colours outside their cell's "
+                         "pair fit in N runs of 24 pixels (default 8, none for no budget)")
     ap.add_argument("--force", action="store_true", help="convert even if unchanged")
     ap.add_argument("--verify", action="store_true",
                     help="run the PRG in PAL and NTSC VICE and compare with the model")
@@ -58,6 +63,8 @@ def main():
         cmd += ["-c", a.chroma]
     if a.size:
         cmd += ["-s", a.size]
+    if a.line_runs:
+        cmd += ["-l", a.line_runs]
     if subprocess.run(cmd + [a.picture]).returncode:
         return 1                        # img2c64 said why
     infos = {}

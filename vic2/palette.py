@@ -56,6 +56,19 @@ def _known():
 
 
 KNOWN = _known()
+NAMES = ((PEPTO, "Pepto"), (COLODORE, "Colodore"),
+         (COLODORE_VICE_PAL, "Colodore as VICE shows it (PAL)"),
+         (COLODORE_VICE_NTSC, "Colodore as VICE shows it (NTSC)"))
+
+
+def palette_name(colours):
+    """The name of the first known palette holding all colours ((r, g, b)), else None
+    (load_indexed maps them to the nearest Pepto)."""
+    colours = set(colours)
+    for pal, name in NAMES:
+        if colours <= set(pal):
+            return name
+    return None
 
 
 def nearest(rgb, palette=PEPTO):
