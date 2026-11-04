@@ -49,7 +49,9 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   bar PRG). `load_indexed` maps colours of all of them exactly (`KNOWN`), others to the
   nearest Pepto (which gets VICE's bright Colodore wrong, e.g. red -> light red).
 - `asm/v2i.inc`: image library (`v2i_*`: machine takeover and exit, raster IRQ,
-  unpacking into VIC bank 3, frame). `asm/v2t.inc`: text library (`v2t_*`: .v2t files,
+  unpacking into VIC bank 3, frame). `v2i_show` takes 0.2-0.4 s (unrolled clear, 5
+  cycles a byte; `v2i_unrle` 18 cycles a literal and skips zero runs, so it relies on the
+  clear; was 0.5-0.85 s, measured with py65). `asm/v2t.inc`: text library (`v2t_*`: .v2t files,
   single lines, measure, clear; bitmap/screen addresses configurable, no VIC setup).
   Each stands alone (own zero page block, own row address helper, prefixed names).
   `asm/slideshow.s`, `asm/diskshow.s`, `asm/viewer.s` and `asm/ask.s` use both;

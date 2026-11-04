@@ -77,7 +77,8 @@ frame: no
 ## Streams
 
 All three streams are **zero-run encoded**: `$00, n` stands for n zero bytes (n =
-1..255), any other byte is itself, and `$00, $00` ends the stream.
+1..255), any other byte is itself, and `$00, $00` ends the stream. (`v2i.inc` clears
+bank 3 first and skips the zero runs instead of writing them.)
 
 - **Bitmap:** whole 320-byte screen rows, one per character row the image covers. They
   decode straight to the bitmap destination, so cells outside the image are 0.

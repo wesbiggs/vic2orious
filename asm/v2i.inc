@@ -250,22 +250,18 @@ v2i_show:
         sta v2i_end
         lda #$34                        ; all RAM (sprites live partly under I/O)
         sta $01
-        lda #$00                        ; clear $c000-$feff
-        sta v2i_dst
-        lda #$c0
-        sta v2i_dst+1
-        ldy #0
-        tya
-@clr:   sta (v2i_dst),y
-        iny
-        bne @clr
-        inc v2i_dst+1
-        ldx v2i_dst+1
-        cpx #$ff
-        bne @clr
-        ldy #$3f                        ; and $ff00-$ff3f, the end of bitmap row 24
-:       sta $ff00,y
-        dey
+        ldx #0                          ; clear $c000-$feff (unrolled: 5 cycles a byte)
+        txa
+@clr:
+        .repeat $3f, i
+        sta $c000 + i * $100,x
+        .endrepeat
+        inx
+        beq :+
+        jmp @clr
+:       ldx #$3f                        ; and $ff00-$ff3f, the end of bitmap row 24
+:       sta $ff00,x
+        dex
         bpl :-
         clc                             ; ptr = start of kernel code
         lda v2i_hdr
@@ -492,33 +488,47 @@ v2i_unpack_to_dst:
         sta v2i_src+1
         ; fall through
 
-; zero-run-length decode (src) -> (dst): $00,n = n zero bytes, $00,$00 ends
+; zero-run-length decode (src) -> (dst): $00,n = n zero bytes, $00,$00 ends. Zero runs
+; are skipped, not written: (dst) must be zero already (v2i_show clears bank 3 first).
+; Literals cost 18 cycles a byte: src and dst share Y until a run adds it to both.
 v2i_unrle:
         ldy #0
-@sp:    lda (v2i_src),y
+@lit:   lda (v2i_src),y
+        beq @run
+        sta (v2i_dst),y
+        iny
         bne @lit
-        jsr @next
+        inc v2i_src+1
+        inc v2i_dst+1
+        bne @lit                        ; (always)
+@run:   tya                             ; src += Y, dst += Y
+        clc
+        adc v2i_src
+        sta v2i_src
+        bcc :+
+        inc v2i_src+1
+        clc
+:       tya
+        adc v2i_dst
+        sta v2i_dst
+        bcc :+
+        inc v2i_dst+1
+:       ldy #1                          ; n
         lda (v2i_src),y
         beq @done
-        tax
-        lda #0
-@zr:    sta (v2i_dst),y
-        inc v2i_dst
-        bne :+
+        clc                             ; dst += n
+        adc v2i_dst
+        sta v2i_dst
+        bcc :+
         inc v2i_dst+1
-:       dex
-        bne @zr
-        jsr @next
-        jmp @sp
-@lit:   sta (v2i_dst),y
-        inc v2i_dst
-        bne :+
-        inc v2i_dst+1
-:       jsr @next
-        jmp @sp
-@next:  inc v2i_src
-        bne @done
+:       lda v2i_src                     ; src += 2
+        clc
+        adc #2
+        sta v2i_src
+        bcc :+
         inc v2i_src+1
+:       ldy #0
+        jmp @lit
 @done:  rts
 
 ; ---- data and state
