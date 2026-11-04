@@ -27,6 +27,11 @@ usage: python3 tools/img2c64.py [-a {both,pal,ntsc,none}] [-b] [-c S] [-d MODE]
               sky and 2% wrong (3% at 1). With the others it puts more colours in each
               cell (fs:0.5: 11% wrong instead of 4%, none: 5% instead of 0.2%).
   -s WxH      fit WxH instead of 320x200 (multiples of 8; with -b, also inside 304x184)
+  -l N        with -d hybrid: a line's colours outside their cell's pair must fit in at most
+              N single colour runs of 24 pixels (the converter's sprites paint them); a pixel
+              needing one more takes the nearest colour that fits. On 5 Kodak photos (PAL,
+              320 wide): hybrid 1.3% wrong, -l 8 0.6%, -l 6 0.3%, at a slightly higher error
+              against the photo (3x3-blurred RMS 14.5, 14.7, 14.9)
 
 Steps: read any format Pillow reads (HEIC too if pillow-heif is installed), apply the EXIF
 orientation, convert from the embedded colour profile to sRGB, flatten transparency onto
@@ -41,6 +46,7 @@ makes sure the picture leaves room for it.
 """
 
 import argparse
+import bisect
 import glob
 import io
 import os
@@ -84,6 +90,7 @@ KERNELS = {
 HYBRID_CLAMP = 32       # hybrid: carried error per channel at most this
 HYBRID_SPREAD = 0.25    # hybrid: cost of mixing far apart colours when picking a cell's pair
 HYBRID_NEAR = 4         # hybrid: pair candidates are the cell pixels' 4 nearest colours
+SPAN_W = 24             # -l: width of a run of colours outside the cell pair (a sprite)
 
 # Pixel width / height on a 4:3 TV: square-pixel sampling rate of the TV standard over the
 # VIC-II dot clock (PAL 7.375 / 7.882 MHz, NTSC 6.136 / 8.182 MHz).
@@ -194,10 +201,22 @@ def cell_pairs(px, w, h, pal):
     return pairs
 
 
-def diffuse(img, pal, kernel, strength=1.0, clamp=None, pairs=None, escape=None):
+def runs_needed(xs):
+    """Fewest SPAN_W wide runs covering the sorted xs (greedy from the left is optimal)."""
+    n, end = 0, None
+    for x in xs:
+        if end is None or x > end:
+            n, end = n + 1, x + SPAN_W - 1
+    return n
+
+
+def diffuse(img, pal, kernel, strength=1.0, clamp=None, pairs=None, escape=None, budget=None):
     """Serpentine error diffusion: each pixel takes the nearest palette colour (with pairs,
     the nearer of its cell's two, unless that is more than escape away: then the nearest
     of all), and passes strength times the error on (each channel clamped to clamp).
+    With budget, a line's pixels outside their cell's pair must fit in at most budget
+    single colour runs of SPAN_W pixels (what the converter's sprites paint): a pixel
+    that would need one more takes the nearest colour that fits, its pair's if no other.
     Returns a "P" image of palette indices."""
     w, h = img.size
     src = img.load()
@@ -208,11 +227,26 @@ def diffuse(img, pal, kernel, strength=1.0, clamp=None, pairs=None, escape=None)
     esc2 = None if escape is None else escape * escape
     for y in range(h):
         sgn = 1 if y % 2 == 0 else -1
+        extra, used = {}, {}     # colour -> sorted xs outside their pair / runs they need
         for x in (range(w) if sgn > 0 else range(w - 1, -1, -1)):
             p = [max(0.0, min(255.0, v)) for v in buf[y][x]]
-            c = nearest(p, pal, pairs[y // 8, x // 8] if pairs else full)
+            pair = pairs[y // 8, x // 8] if pairs else full
+            c = nearest(p, pal, pair)
             if pairs and dist2(p, pal[c]) > esc2:
-                c = nearest(p, pal, full)
+                if budget is None:
+                    c = nearest(p, pal, full)
+                else:
+                    for c2 in sorted(full, key=lambda c2: dist2(p, pal[c2])):
+                        if c2 in pair:
+                            c = c2
+                            break
+                        xs = extra.get(c2, [])
+                        bisect.insort(xs, x)
+                        n = runs_needed(xs)
+                        if sum(used.values()) - used.get(c2, 0) + n <= budget:
+                            extra[c2], used[c2], c = xs, n, c2
+                            break
+                        xs.remove(x)
             q = pal[c]
             put[x, y] = c
             e = [(p[k] - q[k]) * strength for k in range(3)]
@@ -228,9 +262,10 @@ def diffuse(img, pal, kernel, strength=1.0, clamp=None, pairs=None, escape=None)
     return out
 
 
-def convert(img, system, dither, frame=False, box=(MAX_W, MAX_H), chroma=1.0):
+def convert(img, system, dither, frame=False, box=(MAX_W, MAX_H), chroma=1.0, runs=None):
     """dither: (mode, param) from parse_dither. Colours are chosen (and the dither's error
-    measured) against palette(system, chroma); the result has the real colours."""
+    measured) against palette(system, chroma); the result has the real colours. runs:
+    hybrid's budget per line (see diffuse)."""
     size = target_size(img.width, img.height, system, frame, box)
     if size != img.size:
         img = img.resize(size, Image.Resampling.LANCZOS)
@@ -243,7 +278,7 @@ def convert(img, system, dither, frame=False, box=(MAX_W, MAX_H), chroma=1.0):
         src = img.load()
         px = [[src[x, y] for x in range(img.width)] for y in range(img.height)]
         out = diffuse(img, pal, "fs", clamp=HYBRID_CLAMP,
-                      pairs=cell_pairs(px, img.width, img.height, pal), escape=k)
+                      pairs=cell_pairs(px, img.width, img.height, pal), escape=k, budget=runs)
     else:
         out = diffuse(img, pal, mode, strength=k)
     out.putpalette(palette_image(palette(system)).getpalette())
@@ -326,7 +361,12 @@ def main():
                          "pixels the converter cannot place)")
     ap.add_argument("-s", "--size", type=parse_size, default=(MAX_W, MAX_H), metavar="WxH",
                     help="fit WxH instead of 320x200 (multiples of 8)")
+    ap.add_argument("-l", "--line-runs", type=int, metavar="N",
+                    help="with -d hybrid: a line's colours outside their cell's pair fit in at "
+                         "most N runs of 24 pixels (the converter has 8 sprites)")
     a = ap.parse_args()
+    if a.line_runs is not None and (a.dither[0] != "hybrid" or not 0 <= a.line_runs <= 8):
+        ap.error("-l takes 0-8 and needs -d hybrid")
     inputs = expand(a.inputs)
     to_dir = os.path.isdir(a.output) or a.output.endswith(("/", os.sep))
     if len(inputs) > 1 and not to_dir:
@@ -347,7 +387,7 @@ def main():
         except (OSError, Image.UnidentifiedImageError) as e:
             raise SystemExit("img2c64: %s" % e)
         for _, dst, system in (j for j in jobs if j[0] == src):
-            out = convert(img, system, a.dither, a.border, a.size, a.chroma)
+            out = convert(img, system, a.dither, a.border, a.size, a.chroma, a.line_runs)
             out.save(dst, icc_profile=SRGB_ICC)
             print("%s -> %s (%dx%d%s)" % (src, dst, out.width, out.height,
                                           ", " + system.upper() if system else ""))
