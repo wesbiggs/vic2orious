@@ -1,39 +1,47 @@
-# vic2orious
+![vic2orious](docs/vic2orious.png)
 
-Turns small pictures into Commodore 64 hires graphics that use far more colours per 8x8
-cell than the hardware allows: every raster line, the 8 hardware sprites are recoloured
-and moved to paint the pixels the bitmap cannot. Pictures can come with a short story,
-drawn next to the image in a proportional version of the C64 font, or in a GEOS font.
+## Overview
 
-## Example
+`vic2orious` is a suite of formats, tools, and libraries for getting the most from the Commodore 64's VIC-II chip.
+
+**Images**: Turn any source image into a Commodore 64 hi-res bitmap graphic (up to 320x200), using advanced sprite rasterization techniques that allow for far more colours per 8x8 cell than the standard mode allows, with minimal lossiness.
+
+**Text**: Use widely available `.CVT` fonts as in GEOS to render crisp, variable-width text in any available point size. Combine text and images for jaw-dropping screens in your own games and programs.
+
+`vic2orious` consists of:
+- Python-based tooling to create `.v2i` image files and `.v2t` text files, as well as standalone C64 programs to display them in PAL, NTSC, or both
+- Fully documented file formats for both images and text
+- Assembly language libraries for developing your own programs with the renderers
+
+## Image example
 
 ![Source image, C64 output and wrong pixels for a 320x200 dragon](docs/dragon_compare.png)
 
 A full screen (320x200) picture: the source in the C64 palette (left), what the C64
 shows (middle, identical to VICE's output) and the pixels that differ (right, in red).
-In this picture 2098 of 64000 pixels (3.3%) are wrong. Most are on lines that need more
-than 8 single colour sprite spans; the rest are spans whose register writes did not fit
-into the line's free cycles. Fewer colours and less fine detail per line get closer to
-pixel perfect.
+In this picture, 2098 of 64000 pixels (3.3%) are wrong. Most are on lines that need more
+than 8 single colour sprite spans; the rest occur where register writes did not fit
+into the line's free cycles. Fewer colours and less fine detail per line (or narrower images)
+get closer to pixel perfect.
 
 ## Requirements
 
 - Python 3 with [Pillow](https://pypi.org/project/pillow/)
 - [cc65](https://cc65.github.io/) (`cl65`)
 - [VICE](https://vice-emu.sourceforge.io/) (`x64sc`, `c1541`), installed with Homebrew
-  (the build reads its palette and character ROM from `/opt/homebrew/share/vice/C64/`)
+  (by default, the build reads its palette and character ROM from `/opt/homebrew/share/vice/C64/`)
 
 ## 1. Prepare an image
 
 Images must use the 16 C64 colours (Pepto or Colodore palette, or Colodore as VICE
 shows it, which `tools/img2c64.py` writes; other colours go to the nearest Pepto colour),
 with width and height multiples of 8
-(up to the full screen, 320x200). Smaller and simpler images convert better; dithering hurts.
+(up to the full screen, 320x200). Smaller and simpler images convert better; dithered images trade pixel perfection for perceptual accuracy.
 
-`tools/img2c64.py` turns any picture (anything Pillow reads; HEIC with `pillow-heif`)
+`tools/img2c64.py` turns any picture (anything Pillow reads including HEIC with `pillow-heif`)
 into C64 input: it converts to sRGB, stretches the width for the system's pixel shape
 (C64 pixels are about 0.94 as wide as tall on PAL TVs, 0.75 on NTSC), shrinks to fit
-320x200 if needed, rounds both sides to multiples of 8 and maps to the palette:
+320x200 (or less, configurable) if needed, rounds both sides to multiples of 8 and maps to the palette:
 
 ```bash
 python3 tools/img2c64.py photo.jpg -o input/name.png    # input/name-p.png, input/name-n.png
@@ -77,9 +85,10 @@ python3 tools/img2c64.py art.png -a none -o input/art.png   # as is, no stretch,
 
 ### One picture, one PRG
 
-`vic2.prg` does all of it for a single picture: img2c64 (both aspects, Colodore, no
-frame; Floyd-Steinberg unless `-d` names another mode, `-c` and `-l` as above, up to 320x200 unless `-s WxH`), the conversion for PAL and NTSC (centred), and the
-v2i demo with both kernels, which shows the version for the machine until space:
+Python's `vic2.prg` runs the whole pipeline for a single picture: img2c64 as above, `.v2i` image generation, and wrapping into a single PRG output file that renders on a real C64 (or VICE).
+ 
+Defaults are: both aspects, Colodore palette, no frame; Floyd-Steinberg dithering, maximum width of 320 and height of 200, centred horizontally and vertically.
+Run without arguments or pass `-h` for a detailed list of options.
 
 ```bash
 python3 -m vic2.prg /path/to/my_image.png               # my_image.prg in this directory
@@ -92,15 +101,17 @@ make prg PIC=photo.jpg DITHER=hybrid CHROMA=0.6           # and the fourth
 make prg PIC=photo.jpg DITHER=hybrid LINES=none           # hybrid without its line budget
 ```
 
-Its files go to `build/prg/` (`<name>-p.png`, `<name>-n.png`, and the conversions in
-`pal/` and `ntsc/`, reused while the picture is unchanged; `--force` converts again).
-`--run` (or `--run ntsc`) starts it in VICE. Both images have to fit in one PRG
-(`$0801-$bfff`, about 46K together).
+Generated files go to `build/prg/` (`<name>-p.png` and `<name>-n.png` are 16-color target images, and the conversions are placed in
+`pal/` and `ntsc/`.
+`--run` (or `--run ntsc`) starts the generated program in VICE. Both images have to fit in one PRG
+(`$0801-$bfff`, about 46K together). Testing against a variety of images of differing types has not yet caused this to be exceeded, but it is theoretically possible; the converter will complain, and the workaround is to generate separate NTSC and PAL versions.
 
-## 2. Add a story (optional)
+## 2. Add text (optional)
+
+![Example with accompanying text in custom font](docs/text-gaoler.png)
 
 Put the text in `input/<name>.txt`: paragraphs separated by blank lines, a first line
-starting with `# ` becomes the title. It is wrapped to the space right of the image (or
+starting with `# ` becomes the title. It is wrapped to fit the space to the right of the image (or
 below a very wide image); the build tells you if it does not fit.
 
 ### Fonts
@@ -112,7 +123,9 @@ belong to their authors: get your own (GEOS disk archives and font collections h
 plenty) and put them in `fonts/`, which git ignores. Big sizes take memory and screen
 space: a 24 point font fits about 12 letters in the space beside a 128 pixel wide image.
 
-## 3. Questions for the ask demo (optional)
+## 3. Build an interactive demo (optional)
+
+![Interactive "ask" demo](docs/ask-princess.png)
 
 `input/<name>.ask` turns the image into a small interactive scene: a menu of topics beside
 the picture, picked with the number keys, each answered in text drawn while the picture
@@ -120,7 +133,7 @@ stays on screen. Format: a first line `# TITLE`, paragraphs introducing the scen
 for each topic a line `> K label` (K is the key, 1-9) followed by the answer's paragraphs.
 `input/princess.ask` is an example.
 
-## 4. Build
+## 4. Batch processing and slideshows
 
 ```bash
 make                                  # all images in input/
@@ -235,5 +248,5 @@ The C64 side is two independent ca65 libraries:
 
 Copyright 2026 Wes Biggs. Licensed under the [Apache License, Version 2.0](LICENSE).
 
-The default font is generated at build time from the C64 character ROM that comes with
-VICE; it is not part of this repository, and neither are GEOS fonts (see Fonts above).
+The default font is generated at build time from the C64 character ROM that comes from
+VICE or your own machine; it is not part of this repository, and neither are GEOS fonts (see Fonts above).
