@@ -2,8 +2,10 @@
 ; diskshow.inc from disk one after another with the KERNAL and shows each one for
 ; HOLD_SECS seconds (up to 1000, counted in frames: 50 a second on PAL, 60 on NTSC; 0:
 ; until space). Space shows the next image, RUN/STOP returns to BASIC. While an image
-; loads the text screen says which (the KERNAL loader can't run beside a kernel, so the
-; image can't stay up).
+; loads the screen is black with a yellow floppy disk (sprite 0) in the middle (the
+; KERNAL loader can't run beside a kernel, so the image can't stay up); the text screen,
+; which still says what is loading (in black until then), comes back on an error and
+; stays until an image shows again.
 ; Assembled with DUAL=1 it is for a disk with both PAL and NTSC images: it loads
 ; <name>-p.v2i or <name>-n.v2i, whichever suits the machine, and the text named for that
 ; machine in diskshow.inc (one shared, or <name>-p.txt / -n.txt when the layouts differ).
@@ -47,7 +49,15 @@ vptr    = $fb                           ; 2 bytes
 @next:  .word 0
 
         .code
-start:  lda #0
+start:  lda $d020                       ; the text screen, for errors and the return
+        sta orig_d020
+        lda $d021
+        sta orig_d021
+        lda $d011
+        sta orig_d011
+        lda $0286
+        sta orig_0286
+        lda #0
         sta cur
         sta fails
         sta hold
@@ -78,7 +88,10 @@ start:  lda #0
 :       dec vptr
         jmp @mul
 
-load:   lda #<msg_loading
+load:   lda fails                       ; blank, unless an error message is up
+        bne :+
+        jsr blank
+:       lda #<msg_loading
         ldy #>msg_loading
         jsr print
         ldx cur
@@ -135,11 +148,13 @@ load:   lda #<msg_loading
         bne show
 @err:   jsr STOP                        ; RUN/STOP during the load
         beq quit
+        jsr unblank
         lda #<msg_ioerr
         ldy #>msg_ioerr
         jsr print
         jmp skip
-@bad:   lda #<msg_notv2i
+@bad:   jsr unblank
+        lda #<msg_notv2i
         ldy #>msg_notv2i
         jsr print
 skip:   inc fails
@@ -149,7 +164,8 @@ skip:   inc fails
         lda #<msg_none
         ldy #>msg_none
         jsr print
-quit:   jmp ($a002)                     ; BASIC warm start
+quit:   jsr unblank
+        jmp ($a002)                     ; BASIC warm start
 
 show:   lda #0
         sta frame
@@ -167,6 +183,7 @@ show:   lda #0
         bcc :+
         pha                             ; not for this machine (PAL/NTSC)
         jsr v2i_exit
+        jsr unblank
         pla
         jsr v2i_errmsg
         jsr print
@@ -187,7 +204,8 @@ show:   lda #0
 :       jsr v2i_start
 :       lda req
         beq :-
-        jsr v2i_exit                    ; give the machine back to the KERNAL
+        jsr v2i_exit                    ; give the machine back to the KERNAL (back
+                                        ; to the floppy: v2i_init saved its registers)
 :       jsr GETIN                       ; drop keys from the key buffer
         bne :-
         lda req
@@ -282,6 +300,79 @@ loadfile:                               ; load the file set by SETNAM to X/Y; C=
         ldy vptr+1
         jmp LOAD
 
+DISK_BLOCK = 13                         ; the floppy sprite at $0340 (tape buffer)
+DISK_COL  = 7                           ; yellow
+
+blank:                                  ; black screen, black text, the floppy on
+        lda #0
+        sta $d020
+        sta $d021
+        sta $0286                       ; cursor colour: the load messages print black
+        jsr colram
+        ldx #62
+:       lda disk_spr,x
+        sta DISK_BLOCK * 64,x
+        dex
+        bpl :-
+        lda $0288                       ; sprite 0 pointer, after the KERNAL's screen
+        clc
+        adc #>$03f8
+        sta vptr+1
+        lda #<$03f8
+        sta vptr
+        ldy #0
+        lda #DISK_BLOCK
+        sta (vptr),y
+        lda #172                        ; centred: the 20x20 icon is at columns 2-21
+        sta $d000
+        lda #141
+        sta $d001
+        lda #$fe                        ; sprite 0: low X, unexpanded, hires, in front
+        and $d010
+        sta $d010
+        lda #$fe
+        and $d017
+        sta $d017
+        lda #$fe
+        and $d01b
+        sta $d01b
+        lda #$fe
+        and $d01c
+        sta $d01c
+        lda #$fe
+        and $d01d
+        sta $d01d
+        lda #DISK_COL
+        sta $d027
+        lda #1
+        sta $d015
+        lda orig_d011                   ; display on (v2i_exit brings all of it back)
+        and #$7f
+        ora #$10
+        sta $d011
+        rts
+
+unblank:                                ; the text screen as the program found it
+        lda #0
+        sta $d015
+        lda orig_d020
+        sta $d020
+        lda orig_d021
+        sta $d021
+        lda orig_d011
+        and #$7f
+        sta $d011
+        lda orig_0286
+        sta $0286
+colram: ldx #0                          ; colour RAM = A
+:       sta $d800,x
+        sta $d900,x
+        sta $da00,x
+        sta $dae8,x
+        inx
+        bne :-
+        rts
+
 print:  sta vptr                        ; print zero-terminated string at A/Y
         sty vptr+1
         ldy #0
@@ -298,6 +389,15 @@ namebuf: .res 16
 .endif
 hold:   .word 0                         ; frames per image (0: until space)
 fps:    .byte 0
+orig_d020: .byte 0
+orig_d021: .byte 0
+orig_d011: .byte 0
+orig_0286: .byte 0
+disk_spr:                               ; a 5.25" floppy, 20x20 at columns 2-21
+        .byte $1f,$ff,$f8,$3f,$ff,$fc,$3f,$ff,$fc,$3f,$ff,$fc,$3f,$ff,$f8,$3f,$ff,$f8
+        .byte $3f,$c3,$f8,$3f,$81,$fc,$3f,$81,$fc,$3f,$81,$fc,$3f,$81,$fc,$39,$c3,$fc
+        .byte $39,$ff,$fc,$3f,$e7,$fc,$3f,$c3,$fc,$3f,$c3,$fc,$3f,$c3,$fc,$3f,$c3,$fc
+        .byte $3f,$e7,$fc,$1f,$ff,$f8,$00,$00,$00
 magic:  .byte "V2I", 3
 tmagic: .byte "V2T", 4
 msg_loading:

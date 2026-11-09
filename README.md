@@ -168,7 +168,7 @@ about 2,600 of the 3,160 blocks on a `.d81`.
 Further options: `FONT=FILE.cvt[:SIZE]` (see Fonts above), `LEADING=n` (pixel lines
 between text lines, default 2), `AUTO=n`
 (frames per slideshow image, default 250; 0: only space changes the image) and
-`HOLD=n` (seconds diskshow shows each image, default 15; 0: until space; diskshow turns
+`HOLD=n` (seconds diskshow shows each image, default 10; 0: until space; diskshow turns
 it into 50 or 60 frames a second for the machine it runs on) and
 `DISK=d64|d81`. `make help` lists everything. The Makefile runs `python3 -m vic2.build`
 (see `python3 -m vic2.build --help`) and rebuilds only when inputs or options change.
@@ -201,7 +201,8 @@ reuses a cached conversion (`--force` converts again). Outputs, in `build/pal/` 
   (and its story) from disk in turn and showing it for `HOLD` seconds (space: next).
   Loading uses the KERNAL, so it is slow (around half a minute per image with true drive
   emulation; `make run-diskshow FAST=1` loads instantly), and the image can't stay up
-  meanwhile: the text screen says what is loading. RUN/STOP returns to BASIC.
+  meanwhile: the screen shows a yellow floppy disk on black (the text screen comes back only to
+  show a load error). RUN/STOP returns to BASIC.
 - `ask-<name>.prg`: the ask demo for every image with an `.ask` file.
 - `v2i-demo.prg`, `v2t-demo.prg`: the smallest programs using just one of the two
   libraries (an image; text without an image).

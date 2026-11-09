@@ -1160,7 +1160,7 @@ def main():
                          "screen for the others and in the v2i demo)")
     ap.add_argument("--auto", type=int, default=250,
                     help="frames per image (max 255) in the slideshow (0: until space)")
-    ap.add_argument("--hold", type=int, default=15,
+    ap.add_argument("--hold", type=int, default=10,
                     help="seconds per image (max 1000) in diskshow, not counting the loading "
                          "(0: until space)")
     ap.add_argument("--ntsc", action="store_true",

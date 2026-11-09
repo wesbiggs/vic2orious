@@ -131,7 +131,7 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 - Sync: the kernel does not need a stable raster. `Kernel.sync()` tracks a set of possible
   entry times ("hypotheses") and emits RMW/store instructions that land on the start of BA
   low periods until all hypotheses merge. Keep the IRQ prologue in `v2i.inc`
-  (`sta/stx/sty zp`, `jsr v2i_kjump`, `jmp (v2i_kvec)`) as is; the entry window assumed in
+  (`sta/stx/sty zp`, `jsr v2i_kjump`, `nop`, `jmp` whose operand is `v2i_kvec`: 5 cycles, as the `jmp (v2i_kvec)` it replaced, which broke when the vector landed at $xxff) as is; the entry window assumed in
   `convert.py` (`T(IRQ_LINE, 20..47)`) depends on it. It covers any interrupted instruction
   (the `ask` verify build draws text continuously and still matches).
 - All 8 sprites run continuously in 21-line blocks with staggered phases (`SPR_START`), so
@@ -295,7 +295,7 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 - Memory (see also Buffers above): the slideshow PRG must fit `$0801-$bfff` (about 46K); each image is 9-15K, so
   3-4 images. With more, `assemble_slideshow` keeps the longest prefix that assembles;
   `diskshow` gets all of them (names baked in from `diskshow.inc`, loaded like the
-  viewer, text screen shown while loading; `HOLD` seconds per image, 16-bit frame count,
+  viewer, a yellow floppy sprite on black while loading (sprite 0, data at `$0340`, the text printed in black), the text screen only after a load error; `HOLD` seconds per image, 16-bit frame count,
   0 holds an image until space, used by its `--verify` check, which boots it with a one-image D64). The disk is a D64 if
   everything fits (664 blocks, 144 entries; about 13 images), else a D81 (3160 blocks;
   VICE needs `-drive8type 1581`, which the Makefile adds). VIC bank 3 (`$c000-$ffff`) holds the image on screen and is not available.

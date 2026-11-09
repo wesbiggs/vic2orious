@@ -16,7 +16,7 @@ LEADING ?=                      # pixel lines between text lines (default 2)
 FONT    ?=                      # FILE.cvt[:SIZE]: GEOS font for the texts (build --font;
                                 #    default: the character ROM's)
 AUTO    ?=                      # frames per slideshow image (default 250, 0: until space)
-HOLD    ?=                      # seconds per diskshow image (default 15, 0: until space)
+HOLD    ?=                      # seconds per diskshow image (default 10, 0: until space)
 DISK    ?=                      # d64 or d81 (default: d64 if everything fits, else d81)
 NTSC    ?=                      # 1: build for NTSC C64s, into build/ntsc/ (default: PAL,
                                 #    into build/pal/);

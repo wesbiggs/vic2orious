@@ -205,10 +205,15 @@ v2i_irq:
         ldx v2i_save_x
         ldy v2i_save_y
         rti
+; The vectors are the operands of these jumps (not jmp (abs): the 6502 reads a vector at
+; $xxff from $xxff/$xx00, and where the vectors land depends on the host's length).
 v2i_kjump:
-        jmp (v2i_kvec)
+        nop                             ; 2 + 3 cycles, as jmp (v2i_kvec) took: keep it
+        jmp v2i_rts
+v2i_kvec = v2i_kjump + 2
 v2i_hjump:
-        jmp (v2i_hook)
+        jmp v2i_rts
+v2i_hook = v2i_hjump + 1                ; called after the kernel every frame, may use A/X/Y
 v2i_rts:
         rts
 
@@ -535,7 +540,6 @@ v2i_unrle:
 
 v2i_magic: .byte "V2I", 3
 v2i_system: .byte V2I_PAL               ; set by v2i_init
-v2i_hook:  .word v2i_rts                ; called after the kernel every frame, may use A/X/Y
 v2i_ticks: .byte 0                      ; incremented every frame
 
 ; image info, set by v2i_show
@@ -547,7 +551,6 @@ v2i_end:   .byte 0                      ; first raster line below the image (the
                                         ; returns and v2i_hook runs about then)
 
 ; internal
-v2i_kvec:  .word 0
 v2i_save01: .byte 0
 v2i_savedd00: .byte 0
 v2i_savedd02: .byte 0
