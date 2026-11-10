@@ -28,10 +28,13 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   system: `build/pal/`, `build/ntsc/` (`build/dual/` for the dual disk). The file formats
   are documented in its docstring.
 - `vic2/prg.py`: one picture -> `<name>.prg` (cwd, or `-o`) for PAL and NTSC: runs
-  img2c64 (`-d`, `-c`, `-s`, `-l` passed on, else its defaults) into `build/prg/<name>-p/-n.png`, converts each (centred) into
+  img2c64 (`-d`, `-w`, `-c`, `-P`, `-s`, `-l` passed on, else its defaults: it picks the dither) into `build/prg/<name>-p/-n.png`, converts each (centred) into
   `build/prg/pal|ntsc/` (sets `build.BUILD` itself, cached as in the build) and assembles
   `v2i-demo.s` with `DUAL=1`. `--verify` checks both in VICE, `--run [pal|ntsc]`;
-  `make prg PIC=path [DITHER=mode] [CHROMA=S] [SIZE=WxH] [LINES=N|none]`.
+  `make prg PIC=path [DITHER=mode] [CHROMA=S] [PALETTE=F.vpl] [SIZE=WxH] [LINES=N|none]`.
+- `vic2/dither_pick.py`: the dither recommender's metrics (blurred RMS, SSIM of the
+  luma, a*b* colour error), `rank` and `CANDIDATES`; img2c64 without `-d` and
+  `analysis/dither_rank.py` use it. Imported only for that (numpy).
 - `vic2/info.py`: `python3 -m vic2.info FILE.v2i...` prints a `.v2i`'s header and
   metadata (`build.read_v2i`).
 - `vic2/layers.py`: `build/<system>/<name>_sprites.png`, written with `_compare.png` on
@@ -46,8 +49,10 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   whole process (like `timing.set_standard`), `font.current()` returns it.
 - `vic2/palette.py`: Pepto palette, and Colodore (`.vpl`, and as VICE renders it with
   its default colour controls, PAL and NTSC: `COLODORE_VICE_*`, measured from a colour
-  bar PRG). `load_indexed` maps colours of all of them exactly (`KNOWN`), others to the
-  nearest Pepto (which gets VICE's bright Colodore wrong, e.g. red -> light red).
+  bar PRG), and the user's TV (`TV_2026_11`, `tools/tv.vpl`, img2c64's default, plus the
+  current `tools/tv.vpl` if it differs). `load_indexed` maps colours of all of them exactly
+  (`KNOWN`), others to the nearest Pepto (which gets VICE's bright Colodore wrong, e.g.
+  red -> light red); the build warns about such a PNG.
 - `asm/v2i.inc`: image library (`v2i_*`: machine takeover and exit, raster IRQ,
   unpacking into VIC bank 3, frame). `v2i_show` takes 0.2-0.4 s (unrolled clear, 5
   cycles a byte; `v2i_unrle` 18 cycles a literal and skips zero runs, so it relies on the
@@ -61,18 +66,32 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 - `docs/`: `v2i-format.md`, `v2t-format.md` (incl. the font), `v2i-lib.md`, `v2t-lib.md`.
   Keep them in sync with the code.
 - `tools/img2c64.py` (was `png2c64.py`): the user's quantiser (any picture -> PNG in
-  Colodore as VICE shows it by default, its PAL or NTSC rendering per file, tagged sRGB;
+  the user's TV palette, `tools/tv.vpl`, by default; with `-P none` in Colodore as VICE
+  shows it, its PAL or NTSC rendering per file; tagged sRGB;
   the profile's creation date is zeroed so the same input gives the same file, for the cache).
   Converts the input's ICC profile to sRGB, EXIF orientation,
   alpha onto black; `-a both|pal|ntsc|none` (default both) stretches the width by 1/PAR
   (PAL 0.936, NTSC 0.75) and writes `-p`/`-n` files; then fits 320x200 (or `-s WxH`,
   multiples of 8) and rounds to multiples of 8. `-o FILE` or `-o DIR/` (keeps input names, takes several files / glob
-  patterns), `-d floydsteinberg|none` (Pillow's) or `fs:K|atkinson[:K]|hybrid[:E]`
+  patterns), `-d floydsteinberg|none` (Pillow's) or `fs:K|atkinson[:K]|hybrid[:E]`;
+  without `-d` it picks one per picture and system (`candidate`/`pick`, all candidates of
+  all pictures in one process pool): `vic2/dither_pick.py`'s `CANDIDATES` through the
+  converter, ranked by blurred SSIM and a*b* colour error (`-w R,S,C`, default `0,1,1`;
+  needs numpy), recorded as `dither choice` in the settings
   (`diffuse`: own serpentine error diffusion, pure Python; hybrid picks each cell's pair
   with `cell_pairs`, segment distance plus a spread penalty as in Yliluoma, and leaves the
   pair only beyond RGB distance E), `-c S` (colours are chosen against `palette(system,
   S)`, the palette moved towards its luma, then written with the real ones; helps hybrid,
-  hurts the others), `-l N|none` (hybrid: a line's colours outside the cell pairs fit in N
+  hurts the others), `-P FILE.vpl` (the user's screen's palette: colours are chosen
+  against `palette(system, S, view)` and written in view's colours; default
+  `tools/tv.vpl` (`VIEW`), measured from a photo of the user's TV running a colour bar
+  (Nov 2026; far paler than VICE's Colodore, nearest stock VICE palette
+  community-colors), `-P none` for VICE's Colodore; the library functions default to
+  none, so `analysis/` scripts still use Colodore; the dither picker scores what that
+  screen shows, `dither_pick.shown(.., view)`; the build reads the PNGs through
+  `palette.KNOWN`, which has `TV_2026_11` (= tools/tv.vpl) and the current
+  `tools/tv.vpl` if it was measured again: keep old palettes there, or their PNGs map to
+  the nearest Pepto colours), `-l N|none` (hybrid: a line's colours outside the cell pairs fit in N
   runs of 24 px, `runs_needed`; else the nearest colour that fits; default 8,
   `HYBRID_RUNS`). Hybrid's defaults (`-l 8`, `HYBRID_SPREAD` 0.1, `HYBRID_CLAMP` 64) changed
   in Nov 2026. Each output PNG records the settings (`settings`: source name, aspect,
@@ -83,7 +102,8 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 - `analysis/`: one-off measurements, not part of the build (`compare.py`: v2i vs AFLI and
   NUFLI; `spantypes.py`: X-expanded/multicolour spans; `timingloss.py`: wrong pixels by
   cause; `badline_weight.py`: the `RETASK` badline weight; `dither_score.py`: img2c64
-  settings by wrong pixels and blurred RMS against the photo). Inputs and outputs in `build/analysis/`; requirements, invocation and results in
+  settings by wrong pixels and blurred RMS against the photo; `dither_rank.py`: one
+  picture's settings ranked by weighted blurred RMS, SSIM and colour error). Inputs and outputs in `build/analysis/`; requirements, invocation and results in
   its README.
 - `fonts/`: GEOS fonts in Convert format for `--font` (gitignored: third party fonts are
   not committed; the README tells users to bring their own). Tested with a 26 px Old

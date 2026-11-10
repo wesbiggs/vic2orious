@@ -1,0 +1,17 @@
+# C64 palette measured from a photo of a TV running a colour bar (IMG_2009, Nov 2026), black/white normalised; img2c64 -P default
+00 00 00 0
+ff ff ff 0
+b6 2b 2e 0
+3f d7 ec 0
+b0 39 d4 0
+40 c5 5c 0
+00 23 d4 0
+f4 ea 6f 0
+b2 5b 1d 0
+5d 3c 0c 0
+eb 79 76 0
+53 58 5f 0
+94 99 a2 0
+92 ff 9e 0
+50 73 ff 0
+c1 c1 c6 0

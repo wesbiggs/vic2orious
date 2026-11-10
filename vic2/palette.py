@@ -1,5 +1,7 @@
 """Commodore 64 palette (Pepto PAL) and image loading helpers."""
 
+import os
+
 from PIL import Image
 
 PEPTO = [
@@ -43,22 +45,61 @@ COLODORE_VICE_NTSC = [
     (0xDD, 0x56, 0x06), (0x82, 0x41, 0x00), (0xFF, 0x6E, 0x78), (0x59, 0x59, 0x59),
     (0x96, 0x96, 0x96), (0xA0, 0xFF, 0x8C), (0x7D, 0x77, 0xFF), (0xDA, 0xDA, 0xDA),
 ]
+# The user's TV, measured from a photo of it running a colour bar (Nov 2026, black and
+# white normalised): tools/tv.vpl, img2c64's default -P, which writes its PNGs in these
+# colours. If tools/tv.vpl is measured again, keep this list (PNGs made with it) and the
+# new file is known too (TV_FILE below).
+TV_2026_11 = [
+    (0x00, 0x00, 0x00), (0xFF, 0xFF, 0xFF), (0xB6, 0x2B, 0x2E), (0x3F, 0xD7, 0xEC),
+    (0xB0, 0x39, 0xD4), (0x40, 0xC5, 0x5C), (0x00, 0x23, 0xD4), (0xF4, 0xEA, 0x6F),
+    (0xB2, 0x5B, 0x1D), (0x5D, 0x3C, 0x0C), (0xEB, 0x79, 0x76), (0x53, 0x58, 0x5F),
+    (0x94, 0x99, 0xA2), (0x92, 0xFF, 0x9E), (0x50, 0x73, 0xFF), (0xC1, 0xC1, 0xC6),
+]
+TV_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "tools", "tv.vpl")
+
+
+def load_vpl(path):
+    pal = []
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split()
+            pal.append(tuple(int(p, 16) for p in parts[:3]))
+    return pal[:16]
+
+
+NAMES = [(PEPTO, "Pepto"), (COLODORE, "Colodore"),
+         (COLODORE_VICE_PAL, "Colodore as VICE shows it (PAL)"),
+         (COLODORE_VICE_NTSC, "Colodore as VICE shows it (NTSC)"),
+         (TV_2026_11, "TV (tools/tv.vpl, Nov 2026)")]
+try:
+    _tv = load_vpl(TV_FILE)
+    if len(_tv) == 16 and _tv != TV_2026_11:
+        NAMES.append((_tv, "TV (tools/tv.vpl)"))
+except (OSError, ValueError):
+    pass
 
 
 def _known():
-    """Exact colour -> index for every palette above (nearest() alone gets VICE's bright
-    colours wrong: its red is nearer Pepto light red)."""
+    """Exact colour -> index for every palette in NAMES (nearest() alone gets VICE's bright
+    colours wrong: its red is nearer Pepto light red). A palette with a colour another one
+    has at another index is left out (asserted for the fixed ones)."""
     known = {}
-    for pal in (PEPTO, COLODORE, COLODORE_VICE_PAL, COLODORE_VICE_NTSC):
+    for n, (pal, name) in enumerate(list(NAMES)):
+        clash = any(known.get(c, i) != i for i, c in enumerate(pal))
+        assert not clash or n > 4, "%s: a colour in two places" % name
+        if clash:
+            NAMES.remove((pal, name))
+            continue
         for i, c in enumerate(pal):
-            assert known.setdefault(c, i) == i, "colour %r in two places" % (c,)
+            known[c] = i
     return known
 
 
 KNOWN = _known()
-NAMES = ((PEPTO, "Pepto"), (COLODORE, "Colodore"),
-         (COLODORE_VICE_PAL, "Colodore as VICE shows it (PAL)"),
-         (COLODORE_VICE_NTSC, "Colodore as VICE shows it (NTSC)"))
 
 
 def palette_name(colours):
@@ -104,15 +145,3 @@ def save_indexed(path, rows, palette=PEPTO, scale=1):
     if scale != 1:
         im = im.resize((w * scale, h * scale), Image.NEAREST)
     im.save(path)
-
-
-def load_vpl(path):
-    pal = []
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            parts = line.split()
-            pal.append(tuple(int(p, 16) for p in parts[:3]))
-    return pal[:16]

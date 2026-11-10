@@ -229,6 +229,10 @@ def convert_image(path, log=print, frame=False, leading=TEXT_LEADING, at=None, f
 def convert_new(path, name, key, log, frame, at, centre):
     """convert_image without the cache and the text."""
     w, h, img = load_indexed(path)
+    cs = [c for _, c in Image.open(path).convert("RGB").getcolors(1 << 24)]
+    if not palette_name(cs):
+        log("  %s: colours not in a known palette (vic2/palette.py), mapped to the nearest "
+            "Pepto ones" % name)
     col0, row0, fits = place(w // 8, h // 8, frame, at, centre)
     if frame and not fits:
         log("  %s: %dx%d, no room for a frame" % (name, w, h))

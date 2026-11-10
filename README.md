@@ -57,7 +57,13 @@ python3 tools/img2c64.py art.png -a none -o input/art.png   # as is, no stretch,
 - `-o` takes a file name (default `out.png`) or a directory (one that exists, or a path
   ending in `/`), where each picture keeps its name with a `.png` extension. Several
   inputs or a glob pattern need a directory.
-- `-d` picks the dithering. The default, `-d floydsteinberg`, often looks best on
+- `-d` picks the dithering. Without it, img2c64 picks one per picture and system: it
+  tries the modes below (none, fs, fs:0.75, fs:0.5, atkinson, atkinson:0.75 and hybrid
+  with three line budgets), runs each result through the converter, and keeps the one
+  whose C64 picture is closest to the source (blurred SSIM and colour error), printing
+  its pick and the runners-up. That takes about 50 s per picture and system on a 12-core
+  machine; `-w R,S,C` changes the weights of blurred RMS, SSIM and colour error (default
+  `0,1,1`; see `analysis/README.md`). `-d floydsteinberg` (`fs`) often looks lively on
   photos, but its scattered pixels are hard to convert exactly (often 10-15% wrong);
   `-d none` converts almost exactly but looks flat. In between:
   - `-d hybrid[:E]` dithers each 8x8 cell between its best pair of colours, and only
@@ -77,6 +83,13 @@ python3 tools/img2c64.py art.png -a none -o input/art.png   # as is, no stretch,
   keeps the real colours). The C64's colours are far more saturated than most photos,
   so at 1 their browns, reds and blues fall to grey. With `-d hybrid`, `-c 0.6` gives
   warmer colours and fewer wrong pixels; with the other modes it adds wrong pixels.
+- `-P FILE.vpl` uses the palette of your screen, e.g. one measured from a photo of your
+  TV running a colour bar: colours are chosen as it shows them, and the PNG is written
+  in its colours, so it looks on your computer roughly as on the TV. The default,
+  `tools/tv.vpl`, was measured from the author's TV, which is much paler than VICE's
+  Colodore; it keeps backgrounds from going grey there. `-P none` uses VICE's Colodore
+  (what VICE shows by default). The build only reads PNGs in palettes it knows
+  (`vic2/palette.py`: Pepto, Colodore, VICE's Colodore, `tools/tv.vpl`); add yours there.
 - For a frame around the picture, don't draw one into the image: build with
   `make FRAME=1`, and the C64 draws it. Add `-b` here so the picture leaves room for it
   (it fits 304x184 instead of 320x200: one character cell on each side).
@@ -87,7 +100,7 @@ python3 tools/img2c64.py art.png -a none -o input/art.png   # as is, no stretch,
 
 Python's `vic2.prg` runs the whole pipeline for a single picture: img2c64 as above, `.v2i` image generation, and wrapping into a single PRG output file that renders on a real C64 (or VICE).
  
-Defaults are: both aspects, Colodore palette, no frame; Floyd-Steinberg dithering, maximum width of 320 and height of 200, centred horizontally and vertically.
+Defaults are: both aspects, the `tools/tv.vpl` palette, no frame; the dither img2c64 picks, maximum width of 320 and height of 200, centred horizontally and vertically.
 Run without arguments or pass `-h` for a detailed list of options.
 
 ```bash

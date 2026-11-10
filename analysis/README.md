@@ -322,3 +322,121 @@ foliage):
   wrong pixels), and the old one with `-l 8` clearly (15.44).
 - **F-S stays closer by RMS on this one** (14.05), and `-l none` closer still (13.33) at
   11% wrong. `-l 6` is the best of the budgeted settings here.
+
+## dither_rank.py: one picture, settings ranked by weighted RMS, SSIM and colour error
+
+```bash
+python analysis/dither_rank.py PHOTO [-w RMS,SSIM,COLOR] [-s SETTING ...] [--blur] [--ntsc] [-j N]
+```
+
+Runs each setting (written as for `dither_score.py`; default: none, fs, fs:0.75, fs:0.5,
+atkinson, atkinson:0.75, hybrid, hybrid,l=6, hybrid,l=none) through img2c64 and the
+converter, one process per setting, and scores what the C64 shows against the resized
+photo:
+
+- `rms`: the 3x3-blurred RMS error, as `rms c64` above. Lower is better.
+- `ssim`: mean SSIM of the luma (11x11 Gaussian window, sigma 1.5), unblurred; with
+  `--blur`, of the blurred pictures, so dither noise counts as little as it does in `rms`.
+- `color`: the mean distance of the blurred pictures in CIELAB's a*b* plane (chroma and
+  hue, not lightness). Lower is better.
+
+Each metric is scaled over the settings of the run (best 1, worst 0), and `score` is
+their weighted mean: `-w 1,2,1` counts SSIM twice, `-w 0,1,1` ignores RMS (the default).
+The scores are relative to the settings tried, so adding one can reorder the others.
+Pictures go to `build/analysis/rank/`.
+
+There was a PSNR too, dropped as redundant: blurred, it is `rms` on a log scale (20
+log10(255 / rms)); unblurred, it ranked the settings as unblurred SSIM does (rank
+correlation 0.98 on kodim12, 1.00 on kodim23), and as blurred SSIM does on kodim12.
+
+The tables below were measured before `color` existed. kodim23 (the parrots), PAL, `-w 1,2`:
+
+| rank | setting | score | rms | ssim | wrong |
+|---|---|---|---|---|---|
+| 1 | none | 0.667 | 25.71 | 0.7228 | 71 (0.1%) |
+| 2 | fs:0.5 | 0.560 | 16.75 | 0.4744 | 1328 (2.1%) |
+| 3 | atkinson:0.75 | 0.555 | 16.37 | 0.4636 | 1486 (2.3%) |
+| 4 | atkinson | 0.482 | 14.96 | 0.3862 | 2921 (4.6%) |
+| 5 | fs:0.75 | 0.462 | 14.45 | 0.3628 | 3367 (5.3%) |
+| 6 | hybrid,l=none | 0.364 | 14.33 | 0.2949 | 4675 (7.3%) |
+| 7 | hybrid | 0.354 | 14.33 | 0.2882 | 1283 (2.0%) |
+| 8 | hybrid,l=6 | 0.354 | 14.50 | 0.2915 | 591 (0.9%) |
+| 9 | fs | 0.328 | 14.52 | 0.2740 | 6753 (10.6%) |
+
+- **Unblurred SSIM counts dither noise as error,** so it ranks the opposite way from the
+  blurred RMS: the less a setting dithers, the better it scores. With its weight at 2
+  that decides the order, and `none` wins despite the worst RMS.
+- **Weight towards RMS,** or use `--blur`, to rank by how the picture looks from a
+  normal viewing distance.
+
+The same with `--blur`:
+
+| rank | setting | score | rms | ssim | wrong |
+|---|---|---|---|---|---|
+| 1 | atkinson:0.75 | 0.940 | 16.37 | 0.8299 | 1486 (2.3%) |
+| 2 | atkinson | 0.868 | 14.96 | 0.8163 | 2921 (4.6%) |
+| 3 | fs:0.5 | 0.829 | 16.75 | 0.8179 | 1328 (2.1%) |
+| 4 | fs:0.75 | 0.795 | 14.45 | 0.8057 | 3367 (5.3%) |
+| 5 | none | 0.534 | 25.71 | 0.8140 | 71 (0.1%) |
+| 6 | hybrid,l=none | 0.494 | 14.33 | 0.7692 | 4675 (7.3%) |
+| 7 | hybrid | 0.488 | 14.33 | 0.7685 | 1283 (2.0%) |
+| 8 | hybrid,l=6 | 0.456 | 14.50 | 0.7652 | 591 (0.9%) |
+| 9 | fs | 0.328 | 14.52 | 0.7499 | 6753 (10.6%) |
+
+- **`none` drops to fifth:** its blurred SSIM is still high (flat areas keep their
+  structure), but its RMS is by far the worst.
+- **Blurred SSIM prefers the lighter error diffusion** (Atkinson, F-S at 0.5-0.75) over
+  hybrid, whose pairs flatten detail inside cells.
+
+kodim12 (people on a beach, one default F-S does badly), `-w 1,2 --blur`:
+
+| rank | setting | score | rms | ssim | wrong |
+|---|---|---|---|---|---|
+| 1 | atkinson:0.75 | 0.825 | 14.67 | 0.8585 | 684 (1.1%) |
+| 2 | fs:0.5 | 0.812 | 15.07 | 0.8588 | 651 (1.0%) |
+| 3 | none | 0.667 | 20.45 | 0.8679 | 31 (0.0%) |
+| 4 | atkinson | 0.666 | 12.54 | 0.8249 | 2397 (3.7%) |
+| 5 | fs:0.75 | 0.561 | 12.52 | 0.8101 | 2945 (4.6%) |
+| 6 | hybrid | 0.397 | 12.39 | 0.7868 | 2006 (3.1%) |
+| 7 | hybrid,l=6 | 0.387 | 12.91 | 0.7882 | 1243 (1.9%) |
+| 8 | hybrid,l=none | 0.369 | 11.95 | 0.7805 | 4714 (7.4%) |
+| 9 | fs | 0.298 | 12.86 | 0.7756 | 6721 (10.5%) |
+
+- **Default F-S comes last on SSIM** either way here, and fifth on RMS.
+
+By eye, `-w 1,2 --blur` picked well on kodim12 (atkinson:0.75 looked best), less well on
+the colourful ones: its winners on kodim23 (atkinson:0.75) and kodim05 (fs:0.5) are clean
+but turn the parrots' green background and blue wing and the motorbikes' green and red
+mostly grey or brown. SSIM only sees lightness, and a weak error diffusion never builds up
+enough error to leave the nearest grey, so nothing charged for the lost colour.
+
+- **SSIM on colour channels does not fix it.** On YCbCr (Y 0.8, Cb and Cr 0.1 each), and
+  on a*b* with a shift-invariant mean term, it counts the dither's colour speckle as
+  structure: Cb/Cr SSIM liked `none` best on all three photos.
+- **A blurred colour error does** (`color`): `none` is worst on all three, full-strength
+  diffusion best.
+
+Winners (top three) with `color`, all `--blur`, against the picks by eye (kodim12
+atkinson:0.75, then fs:0.5; kodim23 atkinson or fs:0.75; kodim05 fs:0.5 or fs:0.75):
+
+| weights | kodim12 | kodim23 | kodim05 |
+|---|---|---|---|
+| 1,2,0 (no colour) | atkinson:0.75, fs:0.5, none | atkinson:0.75, atkinson, fs:0.5 | fs:0.5, fs:0.75, atkinson:0.75 |
+| 1,2,1 | atkinson:0.75, fs:0.5, atkinson | atkinson:0.75 = atkinson, fs:0.75 | fs:0.75, fs:0.5, hybrid,l=none |
+| 1,2,2 | atkinson, atkinson:0.75, fs:0.5 | atkinson, fs:0.75, atkinson:0.75 | fs:0.75, hybrid,l=none, atkinson |
+| **0,1,1** | **atkinson:0.75**, fs:0.5, atkinson | **atkinson**, atkinson:0.75, fs:0.75 | **fs:0.75**, hybrid,l=none, atkinson |
+| 1,1,1 | atkinson, fs:0.75, atkinson:0.75 | atkinson, fs:0.75, atkinson:0.75 | fs:0.75, hybrid,l=none, atkinson |
+
+- **`0,1,1` (the default) picks the setting that looked best on all three.** `rms` adds
+  little next to `color` (both charge lost colour) and with weight it pulls towards
+  full-strength diffusion.
+- **No single setting wins everywhere:** atkinson:0.75 for the beach (little colour, big
+  flat areas), atkinson for the parrots, fs:0.75 for the motorbikes. Full F-S and the
+  budgeted hybrids are never in a top three: their colour is good but the converter's
+  dropped spans (F-S) or cell blocks (hybrid) cost them SSIM.
+- Three photos and one pair of eyes; check the weights on more pictures before trusting
+  them.
+
+The metrics, `rank` and the default settings and weights live in `vic2/dither_pick.py`
+since; img2c64 uses them to pick a dither when it is given no `-d`.
+

@@ -1,13 +1,12 @@
 """One picture -> one standalone PRG that shows it on PAL and NTSC C64s.
 
-usage: python3 -m vic2.prg [-o OUT.prg] [-d MODE] [-c S] [-s WxH] [-l N|none]
-                          [--force]
+usage: python3 -m vic2.prg [-o OUT.prg] [-d MODE | -w R,S,C] [-c S] [-P FILE.vpl] [-s WxH]
+                          [-l N|none] [--force]
                           [--verify] [--run [pal|ntsc]] PICTURE
 
-The picture (any format tools/img2c64.py reads) is quantised by img2c64 (Colodore as VICE
-shows it, each system's pixel aspect, no room for a frame; -d, -c, -s and -l go to
-img2c64:
-Floyd-Steinberg unless -d names another mode, fitted into 320x200 unless -s WxH) into
+The picture (any format tools/img2c64.py reads) is quantised by img2c64 (the palette of
+tools/tv.vpl unless -P says otherwise, each system's pixel aspect, no room for a frame; -d, -w, -c, -P, -s and -l go
+to img2c64: the dither it picks per system unless -d names one, fitted into 320x200 unless -s WxH) into
 build/prg/<name>-p.png and <name>-n.png, converted for each system (build/prg/pal/,
 build/prg/ntsc/, cached like the build's conversions) and centred, and assembled into the
 dual v2i demo (asm/v2i-demo.s, DUAL=1): both kernels in one PRG, which picks the one for
@@ -38,11 +37,16 @@ def main():
                                              "NTSC C64s.")
     ap.add_argument("picture")
     ap.add_argument("-o", "--output", help="the PRG to write (default: <name>.prg)")
-    ap.add_argument("-d", "--dither", default="floydsteinberg", metavar="MODE",
-                    help="dithering for img2c64: floydsteinberg (default), fs:K, atkinson[:K], "
-                         "hybrid[:E] or none")
+    ap.add_argument("-d", "--dither", metavar="MODE",
+                    help="dithering for img2c64: floydsteinberg, fs:K, atkinson[:K], "
+                         "hybrid[:E] or none (default: img2c64 picks one)")
+    ap.add_argument("-w", "--weights", metavar="R,S,C",
+                    help="img2c64 -w, without -d: weights for picking the dither")
     ap.add_argument("-c", "--chroma", metavar="S",
                     help="img2c64 -c: match against the colours at S times their saturation")
+    ap.add_argument("-P", "--palette", metavar="FILE.vpl",
+                    help="img2c64 -P: choose colours as a screen with this palette shows them "
+                         "(default tools/tv.vpl; none: VICE's Colodore)")
     ap.add_argument("-s", "--size", metavar="WxH",
                     help="fit WxH instead of 320x200 (multiples of 8)")
     ap.add_argument("-l", "--line-runs", metavar="N",
@@ -58,9 +62,15 @@ def main():
     out = os.path.abspath(a.output or name + ".prg")
     os.makedirs(PRG_BUILD, exist_ok=True)
     base = os.path.join(PRG_BUILD, name + ".png")   # its -p/-n files are what gets converted
-    cmd = [sys.executable, TOOL, "-o", base, "-d", a.dither]
+    cmd = [sys.executable, TOOL, "-o", base]
+    if a.dither:
+        cmd += ["-d", a.dither]
+    if a.weights:
+        cmd += ["-w", a.weights]
     if a.chroma:
         cmd += ["-c", a.chroma]
+    if a.palette:
+        cmd += ["-P", a.palette]
     if a.size:
         cmd += ["-s", a.size]
     if a.line_runs:

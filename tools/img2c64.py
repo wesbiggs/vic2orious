@@ -1,7 +1,7 @@
 """Turn pictures into C64-ready PNGs: C64 colours, screen size, PAL/NTSC pixel aspect.
 
-usage: python3 tools/img2c64.py [-a {both,pal,ntsc,none}] [-b] [-c S] [-d MODE]
-                                [-s WxH] [-o OUTPUT] INPUT...
+usage: python3 tools/img2c64.py [-a {both,pal,ntsc,none}] [-b] [-c S] [-P FILE.vpl]
+                                [-d MODE | -w R,S,C] [-s WxH] [-o OUTPUT] INPUT...
 
   -o FILE     write to FILE (default: out.png); with an aspect, FILE-p.png / FILE-n.png
   -o DIR/     write each picture to DIR/<input name>[-p|-n].png; DIR is created if needed.
@@ -11,9 +11,10 @@ usage: python3 tools/img2c64.py [-a {both,pal,ntsc,none}] [-b] [-c S] [-d MODE]
               that one only; none: no stretch, no suffix (for pixel art made at C64 size)
   -b          leave room for a frame: fit 304x184 instead of 320x200 (one cell on each side,
               where the build draws the frame; see below)
-  -d MODE     dithering: floydsteinberg (default, Pillow's; also fs), none, or one that
+  -d MODE     dithering: floydsteinberg (Pillow's; also fs), none, or one that
               leaves the converter fewer pixels it cannot place (in brackets: IMG_1639,
-              320x168 PAL, wrong pixels after conversion; Floyd-Steinberg 15%, none 0.2%):
+              320x168 PAL, wrong pixels after conversion; Floyd-Steinberg 15%, none 0.2%).
+              Without -d, img2c64 picks one per picture and system (see -w):
               fs:K        Floyd-Steinberg passing on K (0-1) of the error (fs:0.5: 4%)
               atkinson:K  Atkinson's kernel (6/8 of the error), times K (default 1: 9%;
                           atkinson:0.75: 5%)
@@ -21,12 +22,28 @@ usage: python3 tools/img2c64.py [-a {both,pal,ntsc,none}] [-b] [-c S] [-d MODE]
                           them, any colour where the pair is more than E (RGB distance,
                           default 90) off, within the line budget of -l; error clamped
                           to +-64
+  -w R,S,C    without -d: try the dithers above (none, fs, fs:0.75, fs:0.5, atkinson,
+              atkinson:0.75, hybrid with -l 8, 6 and none), run each result through the
+              converter and keep the one whose C64 picture is closest to the source, by
+              these weights for the 3x3-blurred RMS error, SSIM and colour (a*b*) error
+              (default 0,1,1; vic2/dither_pick.py, analysis/README.md). Prints the pick
+              and the runners-up. Takes the repo's vic2 package and numpy, and about 40 s
+              of CPU per dither and picture (the converter; run in parallel: about 50 s a
+              picture and system on 12 cores).
   -c S        choose colours as if the palette had S times its saturation (default 1;
               0 < S <= 2); the output still has the real colours. Photos are rarely as
               saturated as the C64's colours: at 1 their reds, browns and blues fall to
               grey. With -d hybrid it pays: -c 0.6 on IMG_1639 gives warm stone and a blue
               sky (and slightly fewer wrong pixels). With the others it puts more colours in each
               cell (fs:0.5: 11% wrong instead of 4%, none: 5% instead of 0.2%).
+  -P FILE     choose colours as the screen shows them: FILE is a VICE palette (.vpl, 16
+              colours, e.g. one measured from a photo of the TV running a colour bar).
+              Default: tools/tv.vpl (measured from the author's TV, much paler than VICE's
+              Colodore); -P none uses VICE's Colodore itself. The output is written in these
+              colours, so it looks on a computer roughly as on that screen; the build
+              reads PNGs in the palettes vic2/palette.py knows (tools/tv.vpl among them),
+              any other colours go to the nearest Pepto ones, wrongly. -c applies to the
+              choice only. Without -d, the dithers are judged by what that screen shows
   -s WxH      fit WxH instead of 320x200 (multiples of 8; with -b, also inside 304x184)
   -l N        with -d hybrid: a line's colours outside their cell's pair must fit in at most
               N single colour runs of 24 pixels (the converter's sprites paint them; default
@@ -40,8 +57,9 @@ orientation, convert from the embedded colour profile to sRGB, flatten transpare
 black; stretch the width so the picture keeps its proportions on that system's TV (C64
 pixels are not square: about 0.94 wide on PAL, 0.75 on NTSC); shrink proportionally to fit
 320x200 (or -s WxH) if needed; round both sides to multiples of 8 (the converter needs that); map to
-the palette: Colodore as VICE shows it with its default colour controls (VICE's PAL
-rendering for -p and -a none files, its NTSC one for -n). Pictures are never enlarged beyond the stretch. The output is tagged sRGB
+the palette: the screen's of -P (default tools/tv.vpl), or with -P none Colodore as VICE
+shows it with its default colour controls (VICE's PAL rendering for -p and -a none files,
+its NTSC one for -n). Pictures are never enlarged beyond the stretch. The output is tagged sRGB
 and records the settings (source name, aspect, fit, dither, chroma, palette) in a PNG text
 chunk "vic2orious"; the build copies them into the .v2i's metadata.
 
@@ -55,6 +73,7 @@ import glob
 import io
 import os
 import sys
+from concurrent.futures import ProcessPoolExecutor
 
 from PIL import Image, ImageCms, ImageOps, PngImagePlugin
 
@@ -66,7 +85,8 @@ except ImportError:
 
 # Colodore (VICE colodore.vpl) as VICE shows it with its default colour controls (brighter
 # and more saturated than the .vpl), per system; keep in sync with vic2/palette.py
-# (COLODORE_VICE_PAL/_NTSC), whose exact lookup maps these back to their indices.
+# (COLODORE_VICE_PAL/_NTSC), whose exact lookup maps these back to their indices. -P none.
+# (-P's default, tools/tv.vpl, is in vic2/palette.py too: TV_2026_11.)
 PALETTES = {
     "pal": [
         0x000000, 0xFFFFFF, 0xD32831, 0x58FFFF,
@@ -105,6 +125,8 @@ SYSTEMS = {"both": ["pal", "ntsc"], "pal": ["pal"], "ntsc": ["ntsc"], "none": [N
 MAX_W, MAX_H = 320, 200
 FRAME = 16                      # -b: a cell of frame on each side
 TEXT_KEY = "vic2orious"         # PNG text chunk with the settings (see settings)
+# -P default: the screen colours are chosen for (measured from a photo of the author's TV)
+VIEW = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tv.vpl")
 
 SRGB = ImageCms.createProfile("sRGB")
 # without the creation date (header bytes 24-35), so the same picture gives the same file
@@ -113,15 +135,29 @@ SRGB_ICC = ImageCms.ImageCmsProfile(SRGB).tobytes()
 SRGB_ICC = SRGB_ICC[:24] + bytes(12) + SRGB_ICC[36:]
 
 
-def palette(system, chroma=1.0):
-    """The system's colours as (r, g, b), each moved away from its own grey (Rec. 601 luma)
-    by chroma: 1 as they are, less to match pictures against paler colours (-c)."""
+def palette(system, chroma=1.0, view=None):
+    """The system's colours (or view's: 16 (r, g, b), -P) as (r, g, b), each moved away
+    from its own grey (Rec. 601 luma) by chroma: 1 as they are, less to match pictures
+    against paler colours (-c)."""
     out = []
-    for c in PALETTES[system or "pal"]:
-        rgb = ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+    for c in view or PALETTES[system or "pal"]:
+        rgb = c if view else ((c >> 16) & 255, (c >> 8) & 255, c & 255)
         y = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
         out.append(tuple(max(0, min(255, int(round(y + chroma * (v - y))))) for v in rgb))
     return out
+
+
+def load_vpl(path):
+    """A VICE palette file: 16 lines "RR GG BB [dither]", # comments. (r, g, b) list."""
+    pal = []
+    with open(path) as f:
+        for line in f:
+            line = line.split("#")[0].split()
+            if line:
+                pal.append(tuple(int(v, 16) for v in line[:3]))
+    if len(pal) != 16 or any(len(c) != 3 or not all(0 <= v <= 255 for v in c) for c in pal):
+        raise ValueError("%s: not a 16 colour VICE palette" % path)
+    return pal
 
 
 def palette_image(colours):
@@ -269,15 +305,16 @@ def diffuse(img, pal, kernel, strength=1.0, clamp=None, pairs=None, escape=None,
 
 
 def convert(img, system, dither, frame=False, box=(MAX_W, MAX_H), chroma=1.0,
-            runs=HYBRID_RUNS):
+            runs=HYBRID_RUNS, view=None):
     """dither: (mode, param) from parse_dither. Colours are chosen (and the dither's error
-    measured) against palette(system, chroma); the result has the real colours. runs:
+    measured) against palette(system, chroma, view); the result has view's colours (or the
+    system's), without chroma. runs:
     hybrid's budget per line (see diffuse), None for none."""
     size = target_size(img.width, img.height, system, frame, box)
     if size != img.size:
         img = img.resize(size, Image.Resampling.LANCZOS)
     mode, k = dither
-    pal = palette(system, chroma)
+    pal = palette(system, chroma, view)
     if mode == "none" or (mode == "fs" and k == 1.0):
         d = Image.Dither.NONE if mode == "none" else Image.Dither.FLOYDSTEINBERG
         out = img.quantize(palette=palette_image(pal), dither=d)
@@ -288,14 +325,15 @@ def convert(img, system, dither, frame=False, box=(MAX_W, MAX_H), chroma=1.0,
                       pairs=cell_pairs(px, img.width, img.height, pal), escape=k, budget=runs)
     else:
         out = diffuse(img, pal, mode, strength=k)
-    out.putpalette(palette_image(palette(system)).getpalette())
+    out.putpalette(palette_image(palette(system, 1.0, view)).getpalette())
     return out.convert("RGB")
 
 
 def settings(src, system, dither, frame=False, box=(MAX_W, MAX_H), chroma=1.0,
-             runs=HYBRID_RUNS):
+             runs=HYBRID_RUNS, picked=None, view_name=None):
     """What convert was given, as "key: value" lines: written into the PNG (text chunk
-    TEXT_KEY), from where the build copies them into the .v2i's metadata."""
+    TEXT_KEY), from where the build copies them into the .v2i's metadata. picked: how -w
+    chose the dither, if it did; view_name: -P's file name."""
     mode, k = dither
     if mode == "none":
         d = "none"
@@ -316,7 +354,10 @@ def settings(src, system, dither, frame=False, box=(MAX_W, MAX_H), chroma=1.0,
              ("fit", "%dx%d%s" % (mw, mh, ", room for a frame" if frame else "")),
              ("dither", d),
              ("chroma", "%g" % chroma),
-             ("palette", "Colodore as VICE shows it (%s)" % (system or "pal").upper())]
+             ("palette", view_name or "Colodore as VICE shows it (%s)" % (
+                 system or "pal").upper())]
+    if picked:
+        lines.insert(5, ("dither choice", picked))
     return "".join("%s: %s\n" % kv for kv in lines)
 
 
@@ -325,6 +366,40 @@ def save(out, dst, text):
     info = PngImagePlugin.PngInfo()
     info.add_text(TEXT_KEY, text)
     out.save(dst, icc_profile=SRGB_ICC, pnginfo=info)
+
+
+def candidate(img, system, name, dither, runs, frame, box, chroma, view=None):
+    """One dither tried for -w: (name, the output, its scores and wrong pixels), as the
+    screen shows it (view, -P, or VICE's Colodore)."""
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from vic2 import dither_pick
+    out = convert(img, system, parse_dither(dither), frame, box, chroma, runs, view)
+    c64, wrong = dither_pick.shown(out, system, view)
+    r = dither_pick.scores(c64, img.resize(out.size, Image.Resampling.LANCZOS))
+    r.update(setting=name, dither=dither, runs=runs, wrong=wrong)
+    return r, out
+
+
+def pick(futures, weights):
+    """The best of a picture's candidates: (result, output, ranked results)."""
+    from vic2 import dither_pick
+    done = [f.result() for f in futures]
+    outs = {r["setting"]: out for r, out in done}
+    ranked = dither_pick.rank([r for r, _ in done], weights)
+    return ranked[0], outs[ranked[0]["setting"]], ranked
+
+
+def parse_weights(v):
+    """-w RMS,SSIM,COLOR."""
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    try:
+        from vic2 import dither_pick
+    except ImportError as e:
+        raise argparse.ArgumentTypeError("needs the repo's vic2 package and numpy (%s)" % e)
+    try:
+        return dither_pick.parse_weights(v)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e))
 
 
 def parse_chroma(v):
@@ -394,13 +469,20 @@ def main():
     ap.add_argument("-b", "--border", action="store_true",
                     help="leave room for the frame the build draws (make FRAME=1): fit "
                          "304x184 instead of 320x200")
-    ap.add_argument("-d", "--dither", default="floydsteinberg", type=parse_dither,
-                    metavar="MODE", help="floydsteinberg (default) or fs[:K], atkinson[:K], "
-                                         "hybrid[:E], none")
+    ap.add_argument("-d", "--dither", type=parse_dither, metavar="MODE",
+                    help="floydsteinberg (fs[:K]), atkinson[:K], hybrid[:E] or none; "
+                         "default: pick per picture (see -w)")
+    ap.add_argument("-w", "--weights", type=parse_weights, metavar="R,S,C",
+                    help="without -d: weights for blurred RMS, SSIM and colour error when "
+                         "picking the dither (default 0,1,1)")
     ap.add_argument("-c", "--chroma", type=parse_chroma, default=1.0, metavar="S",
                     help="match against the colours at S times their saturation (default "
                          "1; with -d hybrid, 0.6 suits many photos: warmer colours and fewer "
                          "pixels the converter cannot place)")
+    ap.add_argument("-P", "--palette", metavar="FILE.vpl", default=VIEW,
+                    help="choose colours as a screen with this VICE palette shows them "
+                         "(default tools/tv.vpl, measured from a TV; none: VICE's Colodore); "
+                         "the output is written in its colours")
     ap.add_argument("-s", "--size", type=parse_size, default=(MAX_W, MAX_H), metavar="WxH",
                     help="fit WxH instead of 320x200 (multiples of 8)")
     ap.add_argument("-l", "--line-runs", metavar="N",
@@ -408,8 +490,10 @@ def main():
                          "most N runs of 24 pixels (the converter has 8 sprites; default %d, "
                          "none for no budget)" % HYBRID_RUNS)
     a = ap.parse_args()
+    if a.dither and a.weights:
+        ap.error("-w picks the dither; leave out -d")
     if a.line_runs is not None:
-        if a.dither[0] != "hybrid":
+        if not a.dither or a.dither[0] != "hybrid":
             ap.error("-l needs -d hybrid")
         if a.line_runs == "none":
             a.line_runs = None
@@ -419,6 +503,12 @@ def main():
             ap.error("-l takes 0-8 or none")
     else:
         a.line_runs = HYBRID_RUNS
+    view = view_name = None
+    if a.palette != "none":
+        try:
+            view, view_name = load_vpl(a.palette), os.path.basename(a.palette)
+        except (OSError, ValueError) as e:
+            ap.error(str(e))
     inputs = expand(a.inputs)
     to_dir = os.path.isdir(a.output) or a.output.endswith(("/", os.sep))
     if len(inputs) > 1 and not to_dir:
@@ -433,17 +523,45 @@ def main():
     for src, dst, _ in jobs:
         if os.path.exists(dst) and os.path.samefile(src, dst):
             raise SystemExit("img2c64: %s would overwrite its input; choose another -o" % src)
+    imgs = {}
     for src in dict.fromkeys(src for src, _, _ in jobs):
         try:
-            img = load(src)
+            imgs[src] = load(src)
         except (OSError, Image.UnidentifiedImageError) as e:
             raise SystemExit("img2c64: %s" % e)
-        for _, dst, system in (j for j in jobs if j[0] == src):
-            out = convert(img, system, a.dither, a.border, a.size, a.chroma, a.line_runs)
-            save(out, dst, settings(src, system, a.dither, a.border, a.size, a.chroma,
-                                    a.line_runs))
-            print("%s -> %s (%dx%d%s)" % (src, dst, out.width, out.height,
-                                          ", " + system.upper() if system else ""))
+    pool = tried = None
+    if not a.dither:
+        weights = a.weights or parse_weights("0,1,1")
+        from vic2 import dither_pick
+        pool = ProcessPoolExecutor()
+        # every candidate of every picture at once, so the pool stays busy
+        tried = [[pool.submit(candidate, imgs[src], system, name, d, runs, a.border, a.size,
+                              a.chroma, view) for name, d, runs in dither_pick.CANDIDATES]
+                 for src, _, system in jobs]
+    try:
+        for i, (src, dst, system) in enumerate(jobs):
+            note = ""
+            if tried:
+                best, out, ranked = pick(tried[i], weights)
+                dither, runs = parse_dither(best["dither"]), best["runs"]
+                picked = ("picked by img2c64 from %d dithers (weights rms %g, ssim %g, "
+                          "color %g): %s" % ((len(ranked),) + tuple(weights) + (
+                              ", ".join("%s %.2f" % (r["setting"], r["score"])
+                                        for r in ranked[:3]),)))
+                note = "; dither %s (next: %s)" % (best["setting"], ", ".join(
+                    "%s %.2f" % (r["setting"], r["score"]) for r in ranked[1:3]))
+            else:
+                dither, runs, picked = a.dither, a.line_runs, None
+                out = convert(imgs[src], system, dither, a.border, a.size, a.chroma, runs,
+                              view)
+            save(out, dst, settings(src, system, dither, a.border, a.size, a.chroma, runs,
+                                    picked, view_name))
+            print("%s -> %s (%dx%d%s)%s" % (src, dst, out.width, out.height,
+                                            ", " + system.upper() if system else "", note),
+                  flush=True)
+    finally:
+        if pool:
+            pool.shutdown(cancel_futures=True)
     return 0
 
 

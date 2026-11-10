@@ -27,10 +27,13 @@ FAST    ?=                      # 1: run-diskshow/-viewer/-d64 load instantly (n
 IMAGE   ?=                      # run-viewer: image name to type at the prompt
 ASK     ?= princess             # run-ask: which ask-<name>.prg
 PIC     ?=                      # prg: any picture -> <name>.prg for PAL and NTSC
-DITHER  ?=                      # prg: fs:K, atkinson[:K], hybrid[:E] or none (default
-                                #   floydsteinberg; img2c64 -d)
+DITHER  ?=                      # prg: floydsteinberg, fs:K, atkinson[:K], hybrid[:E] or
+                                #   none (img2c64 -d; default: img2c64 picks one)
 CHROMA  ?=                      # prg: S, match against the colours at S times their
                                 #   saturation (img2c64 -c; 0.6 with DITHER=hybrid)
+PALETTE ?=                      # prg: FILE.vpl, choose colours as a screen with this
+                                #   VICE palette shows them (img2c64 -P; default
+                                #   tools/tv.vpl, none for VICE's Colodore)
 SIZE    ?=                      # prg: WxH to fit instead of 320x200 (multiples of 8)
 LINES   ?=                      # prg: N|none, hybrid's line budget (img2c64 -l; default
                                 #   8, none to turn it off; needs DITHER=hybrid)
@@ -144,6 +147,7 @@ prg:
 	$(if $(strip $(PIC)),,$(error prg needs PIC=path/to/picture))
 	$(PYTHON) -m vic2.prg $(if $(strip $(DITHER)),-d $(strip $(DITHER))) \
 		$(if $(strip $(CHROMA)),-c $(strip $(CHROMA))) \
+		$(if $(strip $(PALETTE)),-P $(strip $(PALETTE))) \
 		$(if $(strip $(SIZE)),-s $(strip $(SIZE))) \
 		$(if $(strip $(LINES)),-l $(strip $(LINES))) $(strip $(PIC))
 
@@ -169,7 +173,8 @@ help:
 	@echo "make prg PIC=x.png  one picture -> x.prg here, for PAL and NTSC (img2c64,"
 	@echo "                    convert, dual v2i demo; python3 -m vic2.prg); DITHER=none|"
 	@echo "                    fs:K|atkinson[:K]|hybrid[:E], CHROMA=S (e.g. DITHER=hybrid"
-	@echo "                    CHROMA=0.6), SIZE=WxH (fit that instead of 320x200),"
+	@echo "                    CHROMA=0.6), PALETTE=FILE.vpl (colours as that screen"
+	@echo "                    shows them), SIZE=WxH (fit that instead of 320x200),"
 	@echo "                    LINES=N|none (hybrid's line budget, default 8)"
 	@echo "make clean          remove build/ (PAL, NTSC and dual builds)"
 	@echo "options: IMAGES='input/a.png ...' FRAME=1 AT=COLUMN,ROW LEADING=n AUTO=n HOLD=n DISK=d64|d81"
