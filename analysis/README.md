@@ -440,3 +440,42 @@ atkinson:0.75, then fs:0.5; kodim23 atkinson or fs:0.75; kodim05 fs:0.5 or fs:0.
 The metrics, `rank` and the default settings and weights live in `vic2/dither_pick.py`
 since; img2c64 uses them to pick a dither when it is given no `-d`.
 
+
+## mc_estimate.py: would a multicolour bitmap mode be better?
+
+```bash
+python analysis/mc_estimate.py [DITHER ...] [-- PHOTO ...]
+```
+
+Multicolour bitmap (160x200 wide pixels, 3 colours per 4x8 cell plus one background) with
+X-expanded hires sprites, which are 24 wide pixel, single colour spans: the converter's span
+model in wide pixel units. img2c64 (PAL, Colodore) makes both pictures at the same scale
+(for multicolour from the photo squeezed to half width). Hires gets the real converter
+(with timing); multicolour gets the same cell search with colour triples (from each
+cell's 7 most common colours) and the best of the image's 3 most common backgrounds, and
+`convert.cover` with **no timing**, so its numbers are an upper bound. Wrong pixels are vs
+img2c64's picture; RMS is the 3x3-blurred RGB error of what the C64 shows (multicolour
+doubled to 320 wide) against the photo. Pictures and `results.txt` in
+`build/analysis/mc/`. About 20 minutes for the default photos (hires F-S is the slow part).
+
+Results (Nov 2026, kodim01, 03, 05, 15, 23, means):
+
+| dither | hires wrong | hires rms | mc wrong | mc rms |
+|---|---|---|---|---|
+| none | 315 (0.5%) | 22.02 | 0 (0.0%) | 22.57 |
+| fs | 6365 (9.9%) | 13.59 | 13 (0.0%) | **12.42** |
+| atkinson:0.75 | 1707 (2.7%) | 14.53 | 0 (0.0%) | 15.15 |
+
+- **Multicolour is all but exact:** 0-49 wrong pixels per picture, even with full F-S.
+  3+1 colours per cell leave few pixels for the sprites, and 8 spans of 24 wide pixels
+  cover 192 of 160 columns. Timing will cost some of that (an X-expanded span is 6 cycles,
+  so write windows shrink), but there is a lot of slack.
+- **With full F-S it is the closest to the photo of anything measured:** 12.42 against
+  13.59 for hires F-S and 13.09 for hires' default hybrid (dither_score, same photos).
+  Hires F-S loses ~10% of its pixels to the converter; multicolour shows all of its dither.
+- **Without dither, or with lighter dither, hires is a little closer** (0.4-1.0): there
+  both modes show their picture almost exactly, and hires has twice the horizontal
+  resolution.
+- The blur hides lost resolution, so the RMS favours multicolour somewhat: judge by eye
+  too. Hires keeps the sharper edges (wheels, text); multicolour has visibly wider dither
+  dots and no flat grey fallback patches.

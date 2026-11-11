@@ -78,6 +78,17 @@ def rle_zero(data):
 V2I_META = 1                  # header byte 25 (flags): metadata follows the sprite stream
 META_KEY = "vic2orious"       # PNG text chunk img2c64 writes its settings into
 META_MAX = 1024               # metadata text at most this long
+MODE_MC = "multicolor"        # img2c64 -m's "mode" line (tools/img2c64.py MODE_MC)
+
+
+def png_mode(path):
+    """The "mode" line of img2c64's settings in the PNG ("multicolor"), or "hires"."""
+    png = getattr(Image.open(path), "text", {}).get(META_KEY, "")
+    for l in png.splitlines():
+        k, _, v = l.partition(":")
+        if k.strip() == "mode":
+            return v.strip()
+    return "hires"
 
 
 def v2i_metadata(path, frame):
@@ -228,6 +239,9 @@ def convert_image(path, log=print, frame=False, leading=TEXT_LEADING, at=None, f
 
 def convert_new(path, name, key, log, frame, at, centre):
     """convert_image without the cache and the text."""
+    if png_mode(path) == MODE_MC:
+        raise SystemExit("%s: a multicolour picture (img2c64 -m); the build cannot convert "
+                         "those yet" % path)
     w, h, img = load_indexed(path)
     cs = [c for _, c in Image.open(path).convert("RGB").getcolors(1 << 24)]
     if not palette_name(cs):

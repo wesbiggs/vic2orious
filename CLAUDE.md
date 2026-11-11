@@ -93,7 +93,11 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   `tools/tv.vpl` if it was measured again: keep old palettes there, or their PNGs map to
   the nearest Pepto colours), `-l N|none` (hybrid: a line's colours outside the cell pairs fit in N
   runs of 24 px, `runs_needed`; else the nearest colour that fits; default 8,
-  `HYBRID_RUNS`). Hybrid's defaults (`-l 8`, `HYBRID_SPREAD` 0.1, `HYBRID_CLAMP` 64) changed
+  `HYBRID_RUNS`), `-m` (multicolour: one PNG pixel per wide pixel, 160 wide for the full
+  screen, multiples of 4, aspect stretch doubled; `-s`/`-b` still in screen pixels; no
+  hybrid; the picker scores the picture itself, pixels doubled, no converter; settings get
+  `mode: multicolor`, `MODE_MC`, which `build.png_mode` reads: the build stops on such a
+  PNG until it can convert them). Hybrid's defaults (`-l 8`, `HYBRID_SPREAD` 0.1, `HYBRID_CLAMP` 64) changed
   in Nov 2026. Each output PNG records the settings (`settings`: source name, aspect,
   fit, dither with hybrid's constants, chroma, palette) in a `tEXt` chunk `vic2orious`
   (`TEXT_KEY`), which the build copies into the `.v2i` metadata. Refuses to overwrite its input. `-b` only leaves
@@ -103,7 +107,8 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   NUFLI; `spantypes.py`: X-expanded/multicolour spans; `timingloss.py`: wrong pixels by
   cause; `badline_weight.py`: the `RETASK` badline weight; `dither_score.py`: img2c64
   settings by wrong pixels and blurred RMS against the photo; `dither_rank.py`: one
-  picture's settings ranked by weighted blurred RMS, SSIM and colour error). Inputs and outputs in `build/analysis/`; requirements, invocation and results in
+  picture's settings ranked by weighted blurred RMS, SSIM and colour error; `mc_estimate.py`:
+  multicolour bitmap + X-expanded sprites vs hires, timing-free). Inputs and outputs in `build/analysis/`; requirements, invocation and results in
   its README.
 - `fonts/`: GEOS fonts in Convert format for `--font` (gitignored: third party fonts are
   not committed; the README tells users to bring their own). Tested with a 26 px Old
@@ -401,6 +406,14 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   writes: not worth building. Timing costs more: actual wrong pixels minus the exact
   timing-free cover were 688-1035 on the F-S photos (12-19% of their wrong pixels), 326 on
   the dragon.
+
+- Multicolour bitmap (Nov 2026, `analysis/mc_estimate.py`, 5 Kodak photos, no timing
+  for multicolour): 3+1 colours per 4x8 cell plus X-expanded sprites (24 wide pixel spans)
+  shows its picture almost exactly (0-49 wrong pixels, even F-S); with F-S the blurred RMS
+  vs the photo is 12.42 (hires F-S 13.59, hires hybrid 13.09), without or with light
+  dither hires is 0.4-1.0 closer. Plan: one code base, mode per image. Done: img2c64 `-m`;
+  next the converter (cell triples + background, X-expanded spans, timing), then `.v2i`
+  and `v2i.inc`.
 
 ## Ideas not done yet
 

@@ -1,7 +1,7 @@
 """Turn pictures into C64-ready PNGs: C64 colours, screen size, PAL/NTSC pixel aspect.
 
 usage: python3 tools/img2c64.py [-a {both,pal,ntsc,none}] [-b] [-c S] [-P FILE.vpl]
-                                [-d MODE | -w R,S,C] [-s WxH] [-o OUTPUT] INPUT...
+                                [-d MODE | -w R,S,C] [-m] [-s WxH] [-o OUTPUT] INPUT...
 
   -o FILE     write to FILE (default: out.png); with an aspect, FILE-p.png / FILE-n.png
   -o DIR/     write each picture to DIR/<input name>[-p|-n].png; DIR is created if needed.
@@ -44,6 +44,14 @@ usage: python3 tools/img2c64.py [-a {both,pal,ntsc,none}] [-b] [-c S] [-P FILE.v
               reads PNGs in the palettes vic2/palette.py knows (tools/tv.vpl among them),
               any other colours go to the nearest Pepto ones, wrongly. -c applies to the
               choice only. Without -d, the dithers are judged by what that screen shows
+  -m          multicolour bitmap: the picture is made of wide pixels (two screen pixels,
+              so twice the pixel width of -a's), one PNG pixel each: 160 wide for the full
+              screen, multiples of 4. -s and -b still count screen pixels. Not with
+              -d hybrid (its cells are hires cells); without -d the other dithers are
+              judged by the picture itself, each pixel doubled (there is no multicolour
+              converter yet; analysis/mc_estimate.py: it would show nearly every pixel).
+              The PNG's settings get "mode: multicolor". The build cannot convert these
+              yet and stops with a message.
   -s WxH      fit WxH instead of 320x200 (multiples of 8; with -b, also inside 304x184)
   -l N        with -d hybrid: a line's colours outside their cell's pair must fit in at most
               N single colour runs of 24 pixels (the converter's sprites paint them; default
@@ -125,6 +133,7 @@ SYSTEMS = {"both": ["pal", "ntsc"], "pal": ["pal"], "ntsc": ["ntsc"], "none": [N
 MAX_W, MAX_H = 320, 200
 FRAME = 16                      # -b: a cell of frame on each side
 TEXT_KEY = "vic2orious"         # PNG text chunk with the settings (see settings)
+MODE_MC = "multicolor"          # its "mode" line for -m (vic2/build.py reads it)
 # -P default: the screen colours are chosen for (measured from a photo of the author's TV)
 VIEW = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tv.vpl")
 
@@ -189,20 +198,24 @@ def load(path):
     return img
 
 
-def round8(v, limit):
-    return max(8, min(limit, int(v / 8 + 0.5) * 8))
+def round8(v, limit, step=8):
+    return max(step, min(limit, int(v / step + 0.5) * step))
 
 
-def target_size(w, h, system, frame=False, box=(MAX_W, MAX_H)):
+def target_size(w, h, system, frame=False, box=(MAX_W, MAX_H), mc=False):
     """C64 size for a w x h picture: width stretched by 1/PAR, fitted into box (at most
-    320x200; 304x184 with frame)."""
-    if system:
-        w = w / PAR[system]
+    320x200; 304x184 with frame). mc (multicolour): in wide pixels, each two screen pixels
+    wide, so half the width (multiples of 4); with system None the input's pixels are
+    taken as wide pixels already."""
     mw, mh = box
     if frame:
         mw, mh = min(mw, MAX_W - FRAME), min(mh, MAX_H - FRAME)
+    if system:
+        w = w / PAR[system] / (2 if mc else 1)
+    if mc:
+        mw //= 2
     s = min(1.0, mw / w, mh / h)
-    return round8(w * s, mw), round8(h * s, mh)
+    return round8(w * s, mw, 4 if mc else 8), round8(h * s, mh)
 
 
 def dist2(p, q):
@@ -305,12 +318,15 @@ def diffuse(img, pal, kernel, strength=1.0, clamp=None, pairs=None, escape=None,
 
 
 def convert(img, system, dither, frame=False, box=(MAX_W, MAX_H), chroma=1.0,
-            runs=HYBRID_RUNS, view=None):
+            runs=HYBRID_RUNS, view=None, mc=False):
     """dither: (mode, param) from parse_dither. Colours are chosen (and the dither's error
     measured) against palette(system, chroma, view); the result has view's colours (or the
     system's), without chroma. runs:
-    hybrid's budget per line (see diffuse), None for none."""
-    size = target_size(img.width, img.height, system, frame, box)
+    hybrid's budget per line (see diffuse), None for none. mc: multicolour, one output
+    pixel per wide pixel (target_size); hybrid's cells are hires cells, so not with mc."""
+    if mc and dither[0] == "hybrid":
+        raise ValueError("hybrid dithers hires cells; not with multicolour")
+    size = target_size(img.width, img.height, system, frame, box, mc)
     if size != img.size:
         img = img.resize(size, Image.Resampling.LANCZOS)
     mode, k = dither
@@ -330,10 +346,11 @@ def convert(img, system, dither, frame=False, box=(MAX_W, MAX_H), chroma=1.0,
 
 
 def settings(src, system, dither, frame=False, box=(MAX_W, MAX_H), chroma=1.0,
-             runs=HYBRID_RUNS, picked=None, view_name=None):
+             runs=HYBRID_RUNS, picked=None, view_name=None, mc=False):
     """What convert was given, as "key: value" lines: written into the PNG (text chunk
     TEXT_KEY), from where the build copies them into the .v2i's metadata. picked: how -w
-    chose the dither, if it did; view_name: -P's file name."""
+    chose the dither, if it did; view_name: -P's file name. mc adds "mode: multicolor"
+    (MODE_MC), which the build reads; hires pictures have no mode line."""
     mode, k = dither
     if mode == "none":
         d = "none"
@@ -358,6 +375,9 @@ def settings(src, system, dither, frame=False, box=(MAX_W, MAX_H), chroma=1.0,
                  system or "pal").upper())]
     if picked:
         lines.insert(5, ("dither choice", picked))
+    if mc:
+        lines[3] = ("fit", lines[3][1] + " (%dx%d wide pixels)" % (mw // 2, mh))
+        lines.insert(1, ("mode", MODE_MC))
     return "".join("%s: %s\n" % kv for kv in lines)
 
 
@@ -368,14 +388,19 @@ def save(out, dst, text):
     out.save(dst, icc_profile=SRGB_ICC, pnginfo=info)
 
 
-def candidate(img, system, name, dither, runs, frame, box, chroma, view=None):
+def candidate(img, system, name, dither, runs, frame, box, chroma, view=None, mc=False):
     """One dither tried for -w: (name, the output, its scores and wrong pixels), as the
-    screen shows it (view, -P, or VICE's Colodore)."""
+    screen shows it (view, -P, or VICE's Colodore). Multicolour pictures are scored as
+    they are, each pixel doubled (no multicolour converter yet; it would show nearly every
+    pixel, analysis/mc_estimate.py), wrong pixels None."""
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from vic2 import dither_pick
-    out = convert(img, system, parse_dither(dither), frame, box, chroma, runs, view)
-    c64, wrong = dither_pick.shown(out, system, view)
-    r = dither_pick.scores(c64, img.resize(out.size, Image.Resampling.LANCZOS))
+    out = convert(img, system, parse_dither(dither), frame, box, chroma, runs, view, mc)
+    if mc:
+        c64, wrong = out.resize((2 * out.width, out.height), Image.Resampling.NEAREST), None
+    else:
+        c64, wrong = dither_pick.shown(out, system, view)
+    r = dither_pick.scores(c64, img.resize(c64.size, Image.Resampling.LANCZOS))
     r.update(setting=name, dither=dither, runs=runs, wrong=wrong)
     return r, out
 
@@ -483,6 +508,10 @@ def main():
                     help="choose colours as a screen with this VICE palette shows them "
                          "(default tools/tv.vpl, measured from a TV; none: VICE's Colodore); "
                          "the output is written in its colours")
+    ap.add_argument("-m", "--multicolor", action="store_true",
+                    help="multicolour bitmap: wide pixels (two screen pixels each), so the "
+                         "output is half as wide (160 for the full screen); not with -d "
+                         "hybrid")
     ap.add_argument("-s", "--size", type=parse_size, default=(MAX_W, MAX_H), metavar="WxH",
                     help="fit WxH instead of 320x200 (multiples of 8)")
     ap.add_argument("-l", "--line-runs", metavar="N",
@@ -492,6 +521,8 @@ def main():
     a = ap.parse_args()
     if a.dither and a.weights:
         ap.error("-w picks the dither; leave out -d")
+    if a.multicolor and a.dither and a.dither[0] == "hybrid":
+        ap.error("-d hybrid works on hires cells; not with -m")
     if a.line_runs is not None:
         if not a.dither or a.dither[0] != "hybrid":
             ap.error("-l needs -d hybrid")
@@ -535,8 +566,10 @@ def main():
         from vic2 import dither_pick
         pool = ProcessPoolExecutor()
         # every candidate of every picture at once, so the pool stays busy
+        cands = [c for c in dither_pick.CANDIDATES
+                 if not (a.multicolor and c[1].startswith("hybrid"))]
         tried = [[pool.submit(candidate, imgs[src], system, name, d, runs, a.border, a.size,
-                              a.chroma, view) for name, d, runs in dither_pick.CANDIDATES]
+                              a.chroma, view, a.multicolor) for name, d, runs in cands]
                  for src, _, system in jobs]
     try:
         for i, (src, dst, system) in enumerate(jobs):
@@ -553,10 +586,11 @@ def main():
             else:
                 dither, runs, picked = a.dither, a.line_runs, None
                 out = convert(imgs[src], system, dither, a.border, a.size, a.chroma, runs,
-                              view)
+                              view, a.multicolor)
             save(out, dst, settings(src, system, dither, a.border, a.size, a.chroma, runs,
-                                    picked, view_name))
-            print("%s -> %s (%dx%d%s)%s" % (src, dst, out.width, out.height,
+                                    picked, view_name, a.multicolor))
+            print("%s -> %s (%dx%d%s%s)%s" % (src, dst, out.width, out.height,
+                                            " wide pixels" if a.multicolor else "",
                                             ", " + system.upper() if system else "", note),
                   flush=True)
     finally:
