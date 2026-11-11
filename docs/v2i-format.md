@@ -1,7 +1,7 @@
-# .v2i image format (version 3)
+# .v2i image format (versions 3 and 4)
 
-A `.v2i` file holds one converted image: a hires bitmap, its cell colours, the sprite data,
-and a *kernel*. The kernel is 6502 code generated for this image that rewrites the sprite
+A `.v2i` file holds one converted image: a hires bitmap (version 3) or a multicolour
+bitmap (version 4), its cell colours, the sprite data, and a *kernel*. The kernel is 6502 code generated for this image that rewrites the sprite
 registers on every raster line, so the sprites paint the pixels the bitmap can't.
 `vic2/build.py` writes it, and `asm/v2i.inc` displays it ([v2i-lib.md](v2i-lib.md)).
 
@@ -17,8 +17,8 @@ All words are little endian. Offsets are from the start of the data, after the P
 | offset | size | field |
 |---|---|---|
 | 0 | 3 | magic `"V2I"` |
-| 3 | 1 | format version, 3 |
-| 4 | 1 | width in cells (width / 8) |
+| 3 | 1 | format version: 3 hires, 4 multicolour (see [Multicolour](#multicolour-version-4)) |
+| 4 | 1 | width in cells (width / 8 screen pixels) |
 | 5 | 1 | height in cells (height / 8) |
 | 6 | 1 | character column of the image's left edge |
 | 7 | 1 | character row of the image's top edge |
@@ -31,13 +31,36 @@ All words are little endian. Offsets are from the start of the data, after the P
 | 20 | 2 | number of image lines that are not pixel perfect (information only) |
 | 22 | 2 | number of image pixels that are not pixel perfect (information only) |
 | 24 | 1 | video system the kernel is made for: 0 PAL (6569/8565, 63 cycles x 312 lines), 1 NTSC (6567R8/8562, 65 cycles x 263 lines) |
-| 25 | 1 | flags: bit 0 set if metadata follows the sprite stream; other bits 0 |
-| 26 | ... | kernel, then the bitmap, screen and sprite streams, back to back, then the metadata if bit 0 of byte 25 is set |
+| 25 | 1 | flags: bit 0 set if metadata follows the image data; bit 1 multicolour (version 4 only); other bits 0 |
+| 26 | ... | kernel, then the bitmap, screen and sprite streams, back to back (multicolour: then the background and colour RAM stream), then the metadata if bit 0 of byte 25 is set |
 
 Version 2 kernels were entered on raster line 2 (same layout). Version 1 had no video
 system byte (always PAL) and a 24-byte header. Byte 25 was always 0 before metadata was
 added (Nov 2026); players don't read it or anything after the sprite stream, so files
 with and without metadata work with every version 3 player.
+
+## Multicolour (version 4)
+
+A multicolour image (`tools/img2c64.py -m`, written as version 4 so version 3 players
+refuse it) is 160 wide pixels across at most, each two screen pixels wide, in cells of 4x8
+wide pixels; the header still counts 8-pixel cells. Byte 25 has bit 1 set, and after the
+sprite stream come:
+
+| size | field |
+|---|---|
+| 1 | background colour (`$d021`; the build writes 0, black) |
+| 2 | colour RAM stream length |
+| ... | colour RAM stream |
+
+- **Bitmap:** bit pairs, leftmost pixel in bits 7-6: `00` background, `01` the screen
+  byte's high nibble, `10` its low nibble, `11` colour RAM.
+- **Screen:** `c1 << 4 | c2`, as for hires.
+- **Colour RAM:** zero-run encoded like the other streams, whole 40-byte rows, decoded to
+  `$d800 + 40 * row` (screen destination + `$1800`). `v2i_show` clears colour RAM first.
+- **Kernel:** sets `$d016` = `$18` (multicolour) and `$d01d` = `$ff`: the sprites are
+  X-expanded hires sprites, so each covers 24 wide pixels with one colour. Its sprite X
+  registers are screen pixels as usual (the image's wide pixel x is at X = 24 + 8 *
+  column + 2 * x).
 
 ## Metadata
 
@@ -48,8 +71,8 @@ readers should ignore keys they don't know. The build writes, in this order:
 
 - What `tools/img2c64.py` recorded in the PNG (a `tEXt` chunk with keyword
   `vic2orious`, copied line by line), if the picture came from it: `quantiser`
-  (`img2c64`), `source` (the input picture's file name), `aspect` (`pal`, `ntsc` or
-  `none`, with the pixel width), `fit` (the box, `WxH`), `dither` (mode and parameter;
+  (`img2c64`), `mode` (`multicolor`, only for `-m` pictures), `source` (the input picture's file name), `aspect` (`pal`, `ntsc` or
+  `none`, with the pixel width), `fit` (the box, `WxH`; for `-m` also in wide pixels), `dither` (mode and parameter;
   for hybrid also its line runs, spread, clamp and pair candidates), `chroma` and
   `palette`.
 - `image`: the PNG file that was converted.

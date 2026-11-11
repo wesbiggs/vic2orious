@@ -47,6 +47,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUILD = os.path.join(ROOT, "build", "pal")  # build/ntsc with --ntsc (see use_system)
 ASM = os.path.join(ROOT, "asm")
 V2I_VERSION = 3
+V2I_VERSION_MC = 4            # multicolour images (V2I_MC); hires ones stay version 3
 V2I_LOAD = 0x2000
 PLAYER_BUF = 0x2800           # diskshow and viewer load images here, texts at $9800
 V2T_LOAD = 0x1800
@@ -75,9 +76,29 @@ def rle_zero(data):
     return out + b"\0\0"
 
 
-V2I_META = 1                  # header byte 25 (flags): metadata follows the sprite stream
+V2I_META = 1                  # header byte 25 (flags): metadata follows the image data
+V2I_MC = 2                    # flags: multicolour; background and colour RAM stream follow
+                              # the sprite stream
 META_KEY = "vic2orious"       # PNG text chunk img2c64 writes its settings into
 META_MAX = 1024               # metadata text at most this long
+MODE_MC = "multicolor"        # img2c64 -m's "mode" line (tools/img2c64.py MODE_MC)
+
+
+def is_mc(path):
+    """Whether image path (input/<name>.png) is multicolour on the current system (its
+    image_source has img2c64 -m's mode line)."""
+    src = image_source(path)
+    return bool(src) and png_mode(src) == MODE_MC
+
+
+def png_mode(path):
+    """The "mode" line of img2c64's settings in the PNG ("multicolor"), or "hires"."""
+    png = getattr(Image.open(path), "text", {}).get(META_KEY, "")
+    for l in png.splitlines():
+        k, _, v = l.partition(":")
+        if k.strip() == "mode":
+            return v.strip()
+    return "hires"
 
 
 def v2i_metadata(path, frame):
@@ -109,8 +130,12 @@ def read_v2i(path):
                bitmap=w(10), screen=w(12), sprites=w(14), bad_lines=w(20), wrong_px=w(22),
                system=d[24] if d[3] >= 2 else 0, flags=d[25] if d[3] >= 2 else 0)
     meta = None
+    o = 26 + hdr["kernel"] + hdr["bitmap"] + hdr["screen"] + hdr["sprites"]
+    hdr["mc"] = bool(hdr["version"] >= 4 and hdr["flags"] & V2I_MC)
+    if hdr["mc"]:
+        hdr["background"], hdr["colour"] = d[o], w(o + 1)
+        o += 3 + hdr["colour"]
     if hdr["flags"] & V2I_META:
-        o = 26 + hdr["kernel"] + hdr["bitmap"] + hdr["screen"] + hdr["sprites"]
         meta = d[o + 2:o + 2 + w(o)].decode("ascii")
     return hdr, meta
 
@@ -142,7 +167,10 @@ def image_source(path, standard=None):
 
 
 def has_text(path):
-    """Whether image path comes with text to show beside it (a story or an ask demo)."""
+    """Whether image path comes with text to show beside it (a story or an ask demo). Not
+    multicolour images: the text would be drawn in multicolour (wide, wrong colours)."""
+    if is_mc(path):
+        return False
     base = os.path.splitext(path)[0]
     return any(os.path.exists(base + e) for e in (".txt", ".ask"))
 
@@ -196,7 +224,8 @@ def cached_image(name, key):
         return None
     os.utime(meta)                      # up to date (for make)
     g = inf.pop("geom")
-    inf["geom"] = convert.Geometry(inf["w"], inf["h"], frame=g["frame"], at=(g["col0"], g["row0"]))
+    inf["geom"] = convert.Geometry(inf["w"], inf["h"], frame=g["frame"], at=(g["col0"], g["row0"]),
+                                   mc=g.get("mc", False))
     inf["expected"] = load_indexed(inf["expected_png"])[2]
     return inf
 
@@ -221,42 +250,60 @@ def convert_image(path, log=print, frame=False, leading=TEXT_LEADING, at=None, f
     else:
         inf = convert_new(src, name, key, log, frame, at, centre)
     txt = os.path.splitext(path)[0] + ".txt"
+    if os.path.exists(txt) and inf["geom"].mc and not suffix:
+        log("  %s: multicolour, its text is left out" % name)
     inf["txt"] = (make_text(txt, inf["geom"], name, log, leading)
-                  if os.path.exists(txt) and not suffix else None)
+                  if os.path.exists(txt) and not suffix and not inf["geom"].mc else None)
     return inf
 
 
 def convert_new(path, name, key, log, frame, at, centre):
     """convert_image without the cache and the text."""
+    mc = png_mode(path) == MODE_MC
     w, h, img = load_indexed(path)
     cs = [c for _, c in Image.open(path).convert("RGB").getcolors(1 << 24)]
     if not palette_name(cs):
         log("  %s: colours not in a known palette (vic2/palette.py), mapped to the nearest "
             "Pepto ones" % name)
-    col0, row0, fits = place(w // 8, h // 8, frame, at, centre)
+    cw = 4 if mc else 8
+    if mc and frame:
+        log("  %s: multicolour, not framed" % name)
+        frame = False
+    col0, row0, fits = place(w // cw, h // 8, frame, at, centre)
     if frame and not fits:
         log("  %s: %dx%d, no room for a frame" % (name, w, h))
     frame = fits
-    conv = convert.Converter(img, log=lambda m: log("  " + m), frame=frame, at=(col0, row0))
+    conv = convert.Converter(img, log=lambda m: log("  " + m), frame=frame, at=(col0, row0),
+                             mc=mc)
     g = conv.g
     conv.run()
     bits = conv.bitmap()
-    # bitmap and screen are stored as whole screen rows (zero padded, zero-run compressed),
-    # so the player can decode them straight into place
+    # bitmap, screen (and colour RAM) are stored as whole screen rows (zero padded, zero-run
+    # compressed), so the player can decode them straight into place
     bmp = bytearray(320 * g.rows)
     scr = bytearray(40 * g.rows)
+    col = bytearray(40 * g.rows)
     for cy in range(g.rows):
         for cx in range(g.cols):
-            fg, bg = conv.pairs[cy][cx]
             o = cy * 320 + (g.col0 + cx) * 8
             for i in range(8):
                 y = cy * 8 + i
                 b = 0
-                for j in range(8):
-                    if bits[y][cx * 8 + j]:
-                        b |= 0x80 >> j
+                if mc:              # bit pairs, leftmost pixel in bits 7-6
+                    for j in range(4):
+                        b |= bits[y][cx * 4 + j] << (6 - 2 * j)
+                else:
+                    for j in range(8):
+                        if bits[y][cx * 8 + j]:
+                            b |= 0x80 >> j
                 bmp[o + i] = b
-            scr[cy * 40 + g.col0 + cx] = (fg << 4) | bg
+            if mc:
+                c1, c2, c3, _ = conv.pairs[cy][cx]
+                scr[cy * 40 + g.col0 + cx] = (c1 << 4) | c2
+                col[cy * 40 + g.col0 + cx] = c3
+            else:
+                fg, bg = conv.pairs[cy][cx]
+                scr[cy * 40 + g.col0 + cx] = (fg << 4) | bg
     # sprite blocks, slot ZERO_SLOT first
     slots = {}
     for s in range(8):
@@ -275,17 +322,23 @@ def convert_new(path, name, key, log, frame, at, centre):
     os.makedirs(BUILD, exist_ok=True)
     packed = [bytes(conv.kernel.code), rle_zero(bmp), rle_zero(scr), rle_zero(spr)]
     out = conv.render()
+    # expected: what the screen shows, in screen pixels (multicolour: each pixel doubled)
+    shown = [[c for c in row for _ in range(g.scale)] for row in out]
     expected_png = os.path.join(BUILD, "%s_expected.png" % name)
-    save_indexed(expected_png, out)
+    save_indexed(expected_png, shown)
     wrong_px = sum(1 for y in range(h) for x in range(w) if out[y][x] != img[y][x])
     bad_lines = sorted(y for y in range(h) if any(out[y][x] != img[y][x] for x in range(w)))
     first_bad = bad_lines[0] if bad_lines else h
-    hdr = bytearray(b"V2I") + bytes((V2I_VERSION, g.cols, g.rows, g.col0, g.row0))
+    hdr = bytearray(b"V2I") + bytes((V2I_VERSION_MC if mc else V2I_VERSION,
+                                     g.cols, g.rows, g.col0, g.row0))
     for v in [len(d) for d in packed] + [0xE000 + 320 * g.row0, 0xC000 + 40 * g.row0,
                                          len(bad_lines), min(wrong_px, 0xFFFF)]:
         hdr += v.to_bytes(2, "little")
-    hdr += bytes((timing.SYSTEM_ID[timing.STANDARD], V2I_META))
+    hdr += bytes((timing.SYSTEM_ID[timing.STANDARD], V2I_META | (V2I_MC if mc else 0)))
     assert len(hdr) == 26
+    if mc:
+        cram = rle_zero(col)
+        packed.append(bytes((conv.bg,)) + len(cram).to_bytes(2, "little") + cram)
     meta = v2i_metadata(path, frame)
     packed.append(len(meta).to_bytes(2, "little") + meta)
     assert len(hdr) + sum(len(d) for d in packed) <= 0x9800 - PLAYER_BUF, \
@@ -294,7 +347,7 @@ def convert_new(path, name, key, log, frame, at, centre):
     with open(v2i, "wb") as f:
         f.write(V2I_LOAD.to_bytes(2, "little") + hdr + b"".join(packed))
     size = os.path.getsize(v2i) - 2
-    info = dict(name=name, w=w, h=h, geom=g, expected=out, size=size,
+    info = dict(name=name, w=w, h=h, geom=g, expected=shown, size=size,
                 bad_lines=bad_lines, wrong_px=wrong_px, first_bad=first_bad, v2i=v2i)
     log_stats(info, log)
     # side-by-side: source | expected C64 output | wrong pixels
@@ -312,7 +365,7 @@ def convert_new(path, name, key, log, frame, at, centre):
     layers.sprite_layers(conv, os.path.join(BUILD, "%s_sprites.png" % name))
     meta = {k: v for k, v in info.items() if k not in ("geom", "expected")}
     meta.update(key=key, expected_png=expected_png,
-                geom=dict(col0=g.col0, row0=g.row0, frame=g.frame))
+                geom=dict(col0=g.col0, row0=g.row0, frame=g.frame, mc=g.mc))
     with open(os.path.join(BUILD, name + ".json"), "w") as f:
         json.dump(meta, f)
     return info
@@ -980,6 +1033,9 @@ def build_system(a, images, at, standard):
     for img_path, inf in zip(images, infos):
         path = os.path.splitext(img_path)[0] + ".ask"
         if os.path.exists(path):
+            if inf["geom"].mc:
+                print("  ask %s: multicolour image, skipped" % inf["name"])
+                continue
             area = text_area(inf["geom"], min_width=12)
             if area is None:
                 print("  ask %s: no room beside the image" % inf["name"])

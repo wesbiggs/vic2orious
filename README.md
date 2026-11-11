@@ -95,6 +95,11 @@ python3 tools/img2c64.py art.png -a none -o input/art.png   # as is, no stretch,
   (it fits 304x184 instead of 320x200: one character cell on each side).
 - `-s WxH` fits the picture into a smaller box, e.g. `-s 160x96` (multiples of 8). The
   aspect stretch still applies, so the PAL and NTSC versions can differ in size.
+- `-m` makes a multicolour picture: half the horizontal resolution (pixels two screen
+  pixels wide, 160 across), but three colours per cell plus black, so the converter
+  shows nearly every pixel even with full Floyd-Steinberg dithering (hires loses about
+  10% of those). The PNG is 160 wide and says so in its settings; the build makes a
+  multicolour `.v2i` from it, centred, without text or frame. Not with `-d hybrid`.
 
 ### One picture, one PRG
 

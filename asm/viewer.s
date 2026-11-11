@@ -106,7 +106,7 @@ prompt: lda #<msg_prompt
         ldy #>msg_ioerr
         jsr print
         jmp prompt
-@check: ldx #3                          ; "V2I" + version
+@check: ldx #2                          ; "V2I" (v2i_show checks the version)
 @cm:    lda LOADBUF,x
         cmp magic,x
         bne @bad
@@ -234,7 +234,7 @@ print:  sta vptr                        ; print zero-terminated string at A/Y
         bne @p
 @done:  rts
 
-magic:  .byte "V2I", 3
+magic:  .byte "V2I"
 tmagic: .byte "V2T", 4
 txtext: .byte ".TXT"
 msg_prompt:

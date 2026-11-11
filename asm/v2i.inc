@@ -1,4 +1,5 @@
-; v2i: displays a .v2i image (hires bitmap + per-line multiplexed sprites, docs/v2i-format.md)
+; v2i: displays a .v2i image (hires or multicolour bitmap + per-line multiplexed sprites,
+; docs/v2i-format.md)
 ; on a C64. ca65 source: .include it in the host program. API in docs/v2i-lib.md; in short
 ; (A/Y = address: A low, Y high):
 ;
@@ -7,17 +8,19 @@
 ;                  detects PAL/NTSC (v2i_detect)
 ;   v2i_detect     v2i_system = V2I_PAL, V2I_NTSC or V2I_OTHER (also before v2i_init)
 ;   v2i_show       A/Y = .v2i: unpack it into VIC bank 3 (stopped only). C=1: not shown,
-;                  A = V2I_ERR_FORMAT (not a version 3 .v2i) or V2I_ERR_SYSTEM (made for
+;                  A = V2I_ERR_FORMAT (not a version 3 or 4 .v2i) or V2I_ERR_SYSTEM (made for
 ;                  the other video system, or an unsupported VIC-II)
 ;   v2i_errmsg     A = error from v2i_show: A/Y = zero-terminated message (PETSCII)
-;   v2i_frame      A = colour: frame around the image (needs the ring of cells around it)
+;   v2i_frame      A = colour: frame around the image (needs the ring of cells around it;
+;                  hires images only)
 ;   v2i_start      raster IRQ on: the image is displayed, v2i_hook is called every frame
 ;   v2i_stop       raster IRQ off, sprites off, screen blank
 ;   v2i_exit       v2i_stop, restore the registers saved by v2i_init, KERNAL back on, CLI
 ;
 ; The kernel and the IRQ touch only $02, the first 3 bytes at V2I_ZP and VIC registers.
 ; Memory: VIC bank 3 ($c000-$ffff) is the screen: $c000 screen, $c3f8 sprite pointers,
-; $c400.. sprite blocks, $e000 bitmap; v2i_show clears $c000-$feff. Zero page: $02 (the
+; $c400.. sprite blocks, $e000 bitmap; v2i_show clears $c000-$feff (and colour RAM for a
+; multicolour image, which uses it). Zero page: $02 (the
 ; kernels' sync code) and V2I_ZP_SIZE bytes from V2I_ZP (default $10).
 ; Text beside the image: v2t.inc with its defaults (bitmap $e000, screen $c000).
 
@@ -29,10 +32,14 @@ V2I_ZP = $10
 V2I_H_KLEN = 8
 V2I_H_BLEN = 10
 V2I_H_SLEN = 12
+V2I_H_PLEN = 14
 V2I_H_BDST = 16
 V2I_H_SDST = 18
 V2I_H_SYS  = 24
+V2I_H_FLAGS = 25
 V2I_H_SIZE = 26
+V2I_F_MC   = 2                          ; flags: multicolour (version 4): background and
+                                        ; colour RAM stream follow the sprite stream
 
 ; video systems (v2i_system, header byte V2I_H_SYS); kernels are made for one of them
 V2I_PAL    = 0                          ; 6569 (and 8565): 63 cycles x 312 lines
@@ -132,7 +139,8 @@ v2i_detect:
 v2i_start:
         lda #0                          ; border and background (not in the kernel: on
         sta $d020                       ; the 85xx a colour write shows a grey dot, and
-        sta $d021                       ; its entry line is visible on NTSC)
+        lda v2i_bg                      ; its entry line is visible on NTSC)
+        sta $d021
         lda #V2I_IRQ_LINE
         sta $d012
         lda #$3b
@@ -148,6 +156,9 @@ v2i_stop:
         lda #0
         sta $d01a
         sta $d015
+        sta $d01d                       ; a multicolour kernel's X-expanded sprites
+        lda #$08                        ; and multicolour mode
+        sta $d016
         lda #$0b
         sta $d011
         lda #1
@@ -229,13 +240,26 @@ v2i_badsys:
 v2i_show:
         sta v2i_hdr
         sty v2i_hdr+1
-        ldy #3                          ; "V2I" + version
+        ldy #2                          ; "V2I"
 :       lda (v2i_hdr),y
         cmp v2i_magic,y
         bne v2i_badfmt
         dey
         bpl :-
-        ldy #V2I_H_SYS                  ; made for this machine?
+        lda #0                          ; version 3: hires; 4: flags say which
+        sta v2i_mc
+        sta v2i_bg
+        ldy #3
+        lda (v2i_hdr),y
+        cmp #3
+        beq @ver
+        cmp #4
+        bne v2i_badfmt
+        ldy #V2I_H_FLAGS
+        lda (v2i_hdr),y
+        and #V2I_F_MC
+        sta v2i_mc
+@ver:   ldy #V2I_H_SYS                  ; made for this machine?
         lda (v2i_hdr),y
         cmp v2i_system
         bne v2i_badsys
@@ -294,7 +318,37 @@ v2i_show:
         jsr v2i_unpack_to_dst
         lda #$35
         sta $01
+        lda v2i_mc
+        beq @done
+        ldy #V2I_H_PLEN                 ; multicolour: background, stream length (skipped),
+        jsr v2i_advance                 ; colour RAM rows
+        ldy #0
+        lda (v2i_ptr),y
+        sta v2i_bg
         clc
+        lda v2i_ptr
+        adc #3
+        sta v2i_ptr
+        bcc :+
+        inc v2i_ptr+1
+:       lda #0                          ; clear colour RAM (v2i_unrle skips zero runs)
+        ldx #0
+:       sta $d800,x
+        sta $d900,x
+        sta $da00,x
+        sta $db00,x
+        inx
+        bne :-
+        clc                             ; dst = screen destination + $1800 ($d800 + 40 * row)
+        ldy #V2I_H_SDST
+        lda (v2i_hdr),y
+        sta v2i_dst
+        iny
+        lda (v2i_hdr),y
+        adc #$18
+        sta v2i_dst+1
+        jsr v2i_unpack_to_dst
+@done:  clc
         rts
 
 ; ---- A = error from v2i_show: A/Y = a message for it (zero-terminated PETSCII)
@@ -313,7 +367,7 @@ v2i_errmsg:
         ldy v2i_msgs+1,x
         rts
 v2i_msgs:  .word v2i_msg_fmt, v2i_msg_ntsc, v2i_msg_pal, v2i_msg_vic
-v2i_msg_fmt:  .byte "NOT A V2I FILE (VERSION 2)", 0
+v2i_msg_fmt:  .byte "NOT A V2I FILE (VERSION 3 OR 4)", 0
 v2i_msg_ntsc: .byte "THIS IMAGE IS FOR AN NTSC C64", 0
 v2i_msg_pal:  .byte "THIS IMAGE IS FOR A PAL C64", 0
 v2i_msg_vic:  .byte "UNSUPPORTED VIC-II (PAL 6569/8565 OR NTSC 6567R8/8562 ONLY)", 0
@@ -325,6 +379,8 @@ v2i_msg_vic:  .byte "UNSUPPORTED VIC-II (PAL 6569/8565 OR NTSC 6567R8/8562 ONLY)
 v2i_fno:
         rts
 v2i_frame:
+        ldx v2i_mc                      ; hires only (a multicolour bitmap shows the pattern
+        bne v2i_fno                     ; differently)
         sta v2i_fcol
         lda v2i_col                     ; fx0 = col0 - 1, fx1 = col0 + cols
         beq v2i_fno
@@ -538,7 +594,7 @@ v2i_unrle:
 
 ; ---- data and state
 
-v2i_magic: .byte "V2I", 3
+v2i_magic: .byte "V2I"
 v2i_system: .byte V2I_PAL               ; set by v2i_init
 v2i_ticks: .byte 0                      ; incremented every frame
 
@@ -547,6 +603,8 @@ v2i_cols:  .byte 0                      ; size in cells
 v2i_rows:  .byte 0
 v2i_col:   .byte 0                      ; position in cells
 v2i_row:   .byte 0
+v2i_mc:    .byte 0                      ; V2I_F_MC for a multicolour image, else 0
+v2i_bg:    .byte 0                      ; background colour ($d021, v2i_start)
 v2i_end:   .byte 0                      ; first raster line below the image (the kernel
                                         ; returns and v2i_hook runs about then)
 

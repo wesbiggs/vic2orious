@@ -41,18 +41,20 @@ A/Y = address means A = low byte, Y = high byte. All routines may change A, X an
 |---|---|---|
 | `v2i_init` | | `SEI`, ROMs out (`$01` = `$35`), CIA interrupts off, VIC bank 3, own IRQ/NMI vectors. Saves `$d000-$d02e`, `$dd00`/`$dd02`, `$01` and its zero page block for `v2i_exit`. Detects the video system (`v2i_system`, up to one frame). |
 | `v2i_detect` | | Sets `v2i_system` (see below) from the last raster line: up to one frame, interrupts held off meanwhile. Works with the KERNAL on too, before `v2i_init`, for example to pick which file to load. `v2i_init` calls it. |
-| `v2i_show` | A/Y = `.v2i` | Clears `$c000-$feff`, unpacks the image, points the IRQ at its kernel and sets the image info. Only while stopped. Takes 0.2-0.4 s (about 215k cycles for 128x128, 360k for 320x200; the kernel runs where it is, only bitmap, screen and sprites are decoded). C=1: not shown, A = `V2I_ERR_FORMAT` (not a version 3 `.v2i`) or `V2I_ERR_SYSTEM` (the file is for the other video system, or the machine's VIC-II is not supported). |
+| `v2i_show` | A/Y = `.v2i` | Clears `$c000-$feff` (and colour RAM for a multicolour image), unpacks the image, points the IRQ at its kernel and sets the image info. Only while stopped. Takes 0.2-0.4 s (about 215k cycles for 128x128, 360k for 320x200; the kernel runs where it is, only bitmap, screen and sprites are decoded). C=1: not shown, A = `V2I_ERR_FORMAT` (not a version 3 or 4 `.v2i`) or `V2I_ERR_SYSTEM` (the file is for the other video system, or the machine's VIC-II is not supported). |
 | `v2i_errmsg` | A = error | A/Y = a zero-terminated PETSCII message for an error from `v2i_show`, such as "THIS IMAGE IS FOR AN NTSC C64". Print it after `v2i_exit` (KERNAL `CHROUT`). |
-| `v2i_frame` | A = colour | Draws the 4 px frame (white, white, black, white) into the ring of cells around the image, in cell colour A (`$10`: white on black). Does nothing if the ring doesn't fit on the screen. |
-| `v2i_start` | | Border and background black, raster IRQ at line 9 (`V2I_IRQ_LINE`), `CLI`. The image is displayed from the next frame on. |
-| `v2i_stop` | | `SEI`, IRQ off, sprites off, screen blanked. |
+| `v2i_frame` | A = colour | Draws the 4 px frame (white, white, black, white) into the ring of cells around the image, in cell colour A (`$10`: white on black). Does nothing if the ring doesn't fit on the screen, or for a multicolour image. |
+| `v2i_start` | | Border black, background `v2i_bg` (black for hires images), raster IRQ at line 9 (`V2I_IRQ_LINE`), `CLI`. The image is displayed from the next frame on. |
+| `v2i_stop` | | `SEI`, IRQ off, sprites off, screen blanked; X expansion off and hires mode (`$d016` = `$08`), as a multicolour kernel leaves them. |
 | `v2i_exit` | | `v2i_stop`, then restores what `v2i_init` saved (sprite registers, colours, mode, bank, `$01`, zero page), turns the CIA1 timer IRQ back on for the KERNAL, and does a `CLI`. |
 
 ## Variables
 
 - **Image info**, set by `v2i_show`: `v2i_cols` and `v2i_rows` (size in cells),
   `v2i_col` and `v2i_row` (position), and `v2i_end` (the first raster line below the
-  image, about where the kernel returns).
+  image, about where the kernel returns), `v2i_mc` (`V2I_F_MC` for a multicolour image,
+  else 0) and `v2i_bg` (its background colour, which `v2i_start` writes to `$d021`).
+  A multicolour image's cells are 4 wide pixels: `v2i_cols` still counts 8-pixel cells.
 - **`v2i_ticks`** counts frames (50 a second on PAL, 60 on NTSC).
 - **`v2i_system`**, set by `v2i_detect` (and `v2i_init`): `V2I_PAL` (0: 6569 or 8565, 312 lines), `V2I_NTSC`
   (1: 6567R8 or 8562, 263 lines) or `V2I_OTHER` (`$ff`: anything else, such as the early

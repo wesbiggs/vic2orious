@@ -17,12 +17,16 @@ def main():
         h, meta = read_v2i(path)
         if i:
             print()
-        print("%s: .v2i version %d, %s, %dx%d at column %d, row %d" % (
+        mc = h["mc"]
+        print("%s: .v2i version %d, %s, %s %dx%d at column %d, row %d" % (
             path, h["version"], SYSTEMS.get(h["system"], "system %d" % h["system"]),
-            h["cols"] * 8, h["rows"] * 8, h["col0"], h["row0"]))
+            "multicolour" if mc else "hires", h["cols"] * (4 if mc else 8), h["rows"] * 8,
+            h["col0"], h["row0"]))
         print("  kernel %d bytes, bitmap %d, screen %d, sprites %d; %d lines, %d pixels not "
               "exact" % (h["kernel"], h["bitmap"], h["screen"], h["sprites"],
                          h["bad_lines"], h["wrong_px"]))
+        if mc:
+            print("  background %d, colour RAM %d bytes" % (h["background"], h["colour"]))
         for line in (meta or "(no metadata)\n").splitlines():
             print("  " + line)
     return 0

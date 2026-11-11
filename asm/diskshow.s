@@ -111,7 +111,7 @@ load:   lda fails                       ; blank, unless an error message is up
         ldy #>LOADBUF
         jsr loadfile
         bcs @err
-        ldx #3                          ; "V2I" + version
+        ldx #2                          ; "V2I" (v2i_show checks the version)
 :       lda LOADBUF,x
         cmp magic,x
         bne @bad
@@ -398,7 +398,7 @@ disk_spr:                               ; a 5.25" floppy, 20x20 at columns 2-21
         .byte $3f,$c3,$f8,$3f,$81,$fc,$3f,$81,$fc,$3f,$81,$fc,$3f,$81,$fc,$39,$c3,$fc
         .byte $39,$ff,$fc,$3f,$e7,$fc,$3f,$c3,$fc,$3f,$c3,$fc,$3f,$c3,$fc,$3f,$c3,$fc
         .byte $3f,$e7,$fc,$1f,$ff,$f8,$00,$00,$00
-magic:  .byte "V2I", 3
+magic:  .byte "V2I"
 tmagic: .byte "V2T", 4
 msg_loading:
         .byte "LOADING ", 0
