@@ -1,9 +1,10 @@
 # vic2orious: first release
 
-Turn any picture into a C64 hires bitmap with multiplexed sprites, played by a cycle-exact kernel on PAL and NTSC, plus a proportional text library and demos.
+Turn any picture into a C64 hires or multicolour bitmap with multiplexed sprites, played by a cycle-exact kernel on PAL and NTSC, plus a proportional text library and demos.
 
 ## New
 - **v2i images and v2t text:** hires bitmap plus per-line multiplexed sprites with a cycle-exact kernel; `v2i.inc` and `v2t.inc` libraries, a slideshow, a disk viewer, an interactive ask demo and single-library demos.
+- **Multicolour images:** `img2c64 -m` makes 160-pixel-wide pictures with three colours per 4x8 cell plus black; X-expanded sprites paint the rest. Floyd-Steinberg photos come out at 0-1.6% wrong pixels (hires: about 10%). Centred, without text or frame; written as .v2i version 4.
 - **PAL and NTSC:** build for either (`make NTSC=1`) or a dual disk with both (`make DUAL=1`); the dual demo PRG picks its image by `v2i_system`.
 - **Full-size images:** up to 320x200, anywhere on screen (9-bit sprite X), including 200-line images on NTSC; images with no text are centred.
 - **img2c64:** reads anything Pillow reads (HEIC with pillow-heif), applies EXIF orientation and ICC profiles, corrects for PAL/NTSC pixel aspect and fits a box (`-s WxH`).
@@ -16,4 +17,4 @@ Turn any picture into a C64 hires bitmap with multiplexed sprites, played by a c
 - **GEOS fonts** for v2t (`make FONT=...`; bring your own, none are included).
 - **Demos:** smooth scroll (`make run-scroll`) and a stream demo with C64-side word wrap (`make run-stream`).
 - **Build:** per-image conversion cache with `make -j`, `FAST=1` for instant disk loading in VICE, and a `_sprites.png` view of sprite use for each conversion.
-- **File formats:** .v2i version 3 and .v2t version 4.
+- **File formats:** .v2i version 3 (hires) and 4 (multicolour), and .v2t version 4.
