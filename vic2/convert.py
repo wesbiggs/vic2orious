@@ -7,6 +7,13 @@ cell gets two bitmap colours; every pixel of any other colour must be painted by
 wide, single colour). Lines needing more spans keep the 8 covering the most pixels; lines
 whose retasking writes do not fit drop the spans losing the fewest pixels. Uncovered pixels
 fall back to the nearer of the two cell colours.
+
+Multicolour (mc=True): the image is in wide pixels (two screen pixels each; width a
+multiple of 4, up to 160). Every 4x8 cell gets three colours plus the background shared by
+the whole image ($d021), and the sprites are X-expanded hires sprites, so a span is 24 wide
+pixels, single colour, as in hires: everything after the cell colours works in image
+pixels, and only the mapping to sprite X registers (xr) differs. The background is black
+by default (bg).
 """
 
 import functools
@@ -27,6 +34,7 @@ FIT_TRIES = 24        # schedules tried per line before dropping spans greedily
 ROW_WEIGHTS = (150, 40)  # cell colour searches per row: cost of a pixel no span covers
 RETASK = (100, 20)    # row_cost of a sprite retask into the badline / another line
 MAX_W, MAX_H = 320, 200
+MC_CANDS = 7          # multicolour: a cell's colour triples come from its 7 commonest colours
 D010 = 0xD010         # X high bits of all 8 sprites (one register)
 REG_X = [0xD000 + 2 * s for s in range(8)]
 REG_Y = [0xD001 + 2 * s for s in range(8)]
@@ -67,14 +75,22 @@ class Geometry:
     cells around the image), or any (column, row) passed as at.
 
     Sprite X is 9 bits (high bits in $d010), so spans may start anywhere in the image.
+
+    w is in image pixels: wide pixels for multicolour (mc), each scale = 2 screen pixels,
+    in cells cw = 4 wide; w_px is the width on screen.
     """
 
-    def __init__(self, w, h, frame=False, at=None):
-        if w % 8 or h % 8 or not (8 <= w <= MAX_W) or not (8 <= h <= MAX_H):
-            raise ValueError("image must be WxH with W, H multiples of 8, W <= %d, H <= %d (got %dx%d)"
-                             % (MAX_W, MAX_H, w, h))
+    def __init__(self, w, h, frame=False, at=None, mc=False):
+        self.mc = mc
+        self.scale = 2 if mc else 1
+        self.cw = 8 // self.scale
+        mw = MAX_W // self.scale
+        if w % self.cw or h % 8 or not (self.cw <= w <= mw) or not (8 <= h <= MAX_H):
+            raise ValueError("image must be WxH with W a multiple of %d, H of 8, W <= %d, H <= %d "
+                             "(got %dx%d)" % (self.cw, mw, MAX_H, w, h))
         self.w, self.h = w, h
-        self.cols, self.rows = w // 8, h // 8
+        self.w_px = w * self.scale
+        self.cols, self.rows = w // self.cw, h // 8
         self.col0, self.row0 = at if at is not None else ((1, 1) if frame else (0, 0))
         if self.col0 < 0 or self.row0 < 0 or self.col0 + self.cols > 40 or self.row0 + self.rows > 25:
             raise ValueError("a %dx%d image does not fit on the screen at column %d, row %d"
@@ -86,6 +102,14 @@ class Geometry:
         self.raster0 = 0x33 + 8 * self.row0     # first raster line of the image (a badline)
         self.xreg0 = 24 + 8 * self.col0         # sprite X register value for image column 0
         self.xs_max = w - 1                     # rightmost span start (image column)
+
+    def xr(self, x):
+        """Sprite X register value (0..511) of image column x's left edge."""
+        return self.xreg0 + self.scale * x
+
+    def xr_last(self, x):
+        """X of the last screen pixel of image column x (where a span ending there ends)."""
+        return self.xreg0 + self.scale * x + self.scale - 1
 
     @staticmethod
     def frame_fits(col0, row0, cols, rows):
@@ -197,26 +221,34 @@ def spans_cost(prev_spans, spans):
 # ---------------------------------------------------------------- converter
 
 class Converter:
-    def __init__(self, img, log=print, frame=False, at=None):
+    """pairs[cy][cx]: each cell's bitmap colours, (fg, bg) in hires; in multicolour
+    (c1, c2, c3, bg) with bg the shared background (self.bg), c1-c3 repeated when the cell
+    needs fewer (see bitmap for how they are encoded)."""
+
+    def __init__(self, img, log=print, frame=False, at=None, mc=False, bg=0):
         self.img = img
         self.log = log
-        self.g = g = Geometry(len(img[0]), len(img), frame, at)
+        self.g = g = Geometry(len(img[0]), len(img), frame, at, mc)
+        cw = g.cw
         self.cell_colors = [[None] * g.cols for _ in range(g.rows)]
         for cy in range(g.rows):
             for cx in range(g.cols):
                 cnt = {}
                 for y in range(cy * 8, cy * 8 + 8):
-                    for x in range(cx * 8, cx * 8 + 8):
+                    for x in range(cx * cw, cx * cw + cw):
                         cnt[img[y][x]] = cnt.get(img[y][x], 0) + 1
                 self.cell_colors[cy][cx] = cnt
         self.pairs = [[None] * g.cols for _ in range(g.rows)]
+        # multicolour background ($d021): black, so the screen around the image is too
+        # (00 pairs show it everywhere; a free choice got fewer wrong pixels, CLAUDE.md)
+        self.bg = bg if mc else None
         # per line and cell: ((colour, xs), ...) in order of first appearance
         self.line_cells = []
         for y in range(g.h):
             cells = []
             for cx in range(g.cols):
                 by_c = {}
-                for x in range(cx * 8, cx * 8 + 8):
+                for x in range(cx * cw, cx * cw + cw):
                     by_c.setdefault(img[y][x], []).append(x)
                 cells.append(tuple((c, tuple(xs)) for c, xs in by_c.items()))
             self.line_cells.append(cells)
@@ -245,12 +277,24 @@ class Converter:
             prev = sp
         return cost
 
+    def mc_cands(self, cnt):
+        """Multicolour: a cell's candidate colour sets (c1, c2, c3, bg)."""
+        bg = self.bg
+        cols = [c for c in sorted(cnt, key=lambda c: -cnt[c]) if c != bg][:MC_CANDS]
+        if not cols:
+            return [(bg, bg, bg, bg)]
+        if len(cols) <= 3:
+            return [tuple(cols + [cols[-1]] * (3 - len(cols))) + (bg,)]
+        return [t + (bg,) for t in itertools.combinations(cols, 3)]
+
     def choose_row(self, cy, prev_spans, lost_px):
         cands = []
         for cx in range(self.g.cols):
             cnt = self.cell_colors[cy][cx]
             cols = sorted(cnt, key=lambda c: -cnt[c])
-            if len(cols) == 1:
+            if self.g.mc:
+                cands.append(self.mc_cands(cnt))
+            elif len(cols) == 1:
                 cands.append([(cols[0], cols[0])])
             elif len(cols) == 2:
                 cands.append([(cols[0], cols[1])])
@@ -288,7 +332,7 @@ class Converter:
     # ---- main
     def run(self):
         g = self.g
-        RASTER0, XREG0, IMG_W, IMG_H = g.raster0, g.xreg0, g.w, g.h
+        RASTER0, XREG0, IMG_H = g.raster0, g.xreg0, g.h
         slot_of = g.slot_of
         vic = timing.Vic(badlines(), g.sprite_lines())
         entry = [T(IRQ_LINE, c) for c in range(20, 48)]
@@ -299,9 +343,10 @@ class Converter:
         pro = [(REG_Y[s], SPR_START[s] - 1) for s in range(8)]
         pro += [(0xD017, 0), (0xD015, 0xFF)]
         pro += [(PTR[s], ZERO_SLOT) for s in range(8)]
-        pro += [(r, 0) for r in (0xD01B, 0xD01C, 0xD01D)]   # not $d020/$d021 (v2i_start)
+        # not $d020/$d021 (v2i_start); multicolour: X-expanded sprites, multicolour bitmap
+        pro += [(0xD01B, 0), (0xD01C, 0), (0xD01D, 0xFF if g.mc else 0)]
         pro += [(D010, "H")]
-        pro += [(0xD016, 0x08), (0xD018, 0x08), (0xD011, D011)]
+        pro += [(0xD016, 0x18 if g.mc else 0x08), (0xD018, 0x08), (0xD011, D011)]
         for s in range(8):
             pro += [(REG_X[s], "X%d" % s), (REG_C[s], "C%d" % s)]
         k.prologue(pro)
@@ -343,7 +388,7 @@ class Converter:
         # Scheduled with the last line, so fit_line can drop spans for it: above a badline
         # a full width image leaves it a single cycle
         r = RASTER0 + IMG_H
-        lo = max(T(r - 1, pc(XREG0 + IMG_W - 1) + 1 + MARGIN), T(r - 1, timing.Y_AFTER))
+        lo = max(T(r - 1, pc(XREG0 + g.w_px - 1) + 1 + MARGIN), T(r - 1, timing.Y_AFTER))
         off = sch.new_task(0xD015, 0, lo, T(r, 54), "off")
         fixed.setdefault(r - 1, []).extend(
             [off] + [p for (B, p) in ptr_tasks if B <= r and timing.raster_of(p.hi) >= r])
@@ -391,7 +436,7 @@ class Converter:
         hi_bits = 0
         for s in range(8):
             fc = first_cfg[s] or (0, 0, 0)
-            k.code[k.patches["X%d" % s]] = (XREG0 + fc[0]) & 0xFF
+            k.code[k.patches["X%d" % s]] = g.xr(fc[0]) & 0xFF
             k.code[k.patches["C%d" % s]] = fc[1]
             hi_bits |= fc[2] << s
         k.code[k.patches["H"]] = hi_bits
@@ -476,10 +521,10 @@ class Converter:
         spans) when their colour and position already reach them: no register writes.
         A sprite painting a span already may only add pixels right of its first one, which
         its writes for this line are due before. Returns the number still uncovered."""
-        XREG0, W = self.g.xreg0, self.g.w
+        g, W = self.g, self.g.w
         need = {}
         for x, c in enumerate(self.img[y]):
-            if c not in rowpairs[x >> 3]:
+            if c not in rowpairs[x // g.cw]:
                 need[x] = c
         for s, bits in rows.items():
             xs = cfg[s][0]
@@ -504,7 +549,7 @@ class Converter:
                 last = xs + 23
                 while not new >> (23 - (last - xs)) & 1:
                     last -= 1
-                last_use[s] = (r, XREG0 + last)
+                last_use[s] = (r, g.xr_last(last))
         return len(need)
 
     def line_tasks(self, sch, assign, cfg, first_cfg, last_use, r, y):
@@ -516,15 +561,15 @@ class Converter:
         than the previous line's, last_use[8]), so they land in order. Between the X and the
         $d010 write the sprite sits at a mixed X; both writes get a window in which neither
         mixed X can start the sprite (see safe_window)."""
-        XREG0 = self.g.xreg0
+        g = self.g
         tasks, rows, owner = [], {}, {}
         bits_before = self.hi_mask(cfg)
         changes = []      # (sprite, lo, hi, span) of high bit changes
         for s, (sp, xs) in assign.items():
             c, a, b, pxs = sp
             newcfg = (xs, c)
-            first_px = XREG0 + a
-            new_x = XREG0 + xs
+            first_px = g.xr(a)
+            new_x = g.xr(xs)
             if cfg[s] is None:
                 hi_bit = new_x >> 8
                 if last_use[8] is not None and hi_bit:
@@ -541,7 +586,7 @@ class Converter:
                     tk = sch.new_task(REG_C[s], c, lo, T(r, pc(first_px) - 1 - MARGIN), "c%d@%d" % (s, y))
                     tasks.append(tk)
                     owner[tk.id] = sp
-                old_x = XREG0 + cfg[s][0]
+                old_x = g.xr(cfg[s][0])
                 if old_x != new_x:
                     hi = T(r, pc(min(old_x, new_x)) - 1 - MARGIN)
                     if (old_x ^ new_x) & 0x100:
@@ -553,7 +598,7 @@ class Converter:
                         tasks.append(tk)
                         owner[tk.id] = sp
             cfg[s] = newcfg
-            last_use[s] = (r, XREG0 + b)
+            last_use[s] = (r, g.xr_last(b))
             bits = 0
             for x in pxs:
                 bits |= 1 << (23 - (x - xs))
@@ -578,7 +623,7 @@ class Converter:
 
     def hi_mask(self, cfg):
         """$d010 as the sprites' current positions need it (unused sprites: 0)."""
-        return sum(1 << s for s in range(8) if cfg[s] is not None and self.g.xreg0 + cfg[s][0] >= 256)
+        return sum(1 << s for s in range(8) if cfg[s] is not None and self.g.xr(cfg[s][0]) >= 256)
 
     def safe_window(self, lo, hi, r, mixed):
         """Largest part of lo..hi in which no X in mixed starts the sprite on line r - 1 or
@@ -605,7 +650,7 @@ class Converter:
         m = len(spans)
         if m == 0:
             return {}
-        XREG0 = self.g.xreg0
+        xr = self.g.xr
         opts = []  # per span, per sprite: (cost, xstart)
         for j, (c, a, b, pxs) in enumerate(spans):
             lo_x, hi_x = b - 23, min(a, self.g.xs_max)
@@ -616,19 +661,19 @@ class Converter:
                 if cur is None:
                     # after the first $d010 write an unused sprite's high bit is 0
                     xs = self.pick_x(c, lo_x, hi_x, fut, 0 if last_use[8] is not None else None)
-                    cost = 100 * ((XREG0 + xs) >> 8) if last_use[8] is not None else 0
+                    cost = 100 * (xr(xs) >> 8) if last_use[8] is not None else 0
                 else:
                     if cur[1] != c:
                         writes += 1
                     if lo_x <= cur[0] <= hi_x:
                         xs = cur[0]
                     else:
-                        hb = (XREG0 + cur[0]) >> 8
+                        hb = xr(cur[0]) >> 8
                         xs = self.pick_x(c, lo_x, hi_x, fut, hb)
                         # the low byte, and $d010 when crossing X = 256 (a write that may
                         # be shared, and a narrower window: weigh it a bit less)
-                        writes += ((XREG0 + xs) & 0xFF != (XREG0 + cur[0]) & 0xFF)
-                        writes += 0.8 * ((XREG0 + xs) >> 8 != hb)
+                        writes += (xr(xs) & 0xFF != xr(cur[0]) & 0xFF)
+                        writes += 0.8 * (xr(xs) >> 8 != hb)
                     cost = writes * 100
                     if writes:
                         lr, lx = last_use[s]
@@ -637,7 +682,7 @@ class Converter:
                         # whose last pixels were far left on the previous line
                         cost -= min(idle, 6) * 8
                         if idle == 1:
-                            cost += max(0, (lx - self.g.xreg0) - a) // 8
+                            cost += max(0, lx - xr(a)) // 8
                 row.append((cost, xs))
             opts.append(row)
         INF = float("inf")
@@ -660,7 +705,7 @@ class Converter:
         """Span start in lo_x..hi_x reaching most of the coming lines' spans of colour c;
         with sprite X high bit hi_bit if the range allows it."""
         if hi_bit is not None:
-            edge = 256 - self.g.xreg0       # first start with the high bit set
+            edge = -(-(256 - self.g.xreg0) // self.g.scale)   # first start with the high bit set
             lo2, hi2 = (lo_x, min(hi_x, edge - 1)) if hi_bit == 0 else (max(lo_x, edge), hi_x)
             if lo2 <= hi2:
                 lo_x, hi_x = lo2, hi2
@@ -695,7 +740,9 @@ class Converter:
 
     def bitmap(self):
         """Bitmap bits (1 = cell foreground). Pixels the sprites failed to paint get the
-        nearer of the two cell colours."""
+        nearer of the two cell colours. Multicolour: per wide pixel its bit pair, 0 =
+        background ($d021), 1-3 = c1-c3 of the cell (c1 the screen byte's high nibble, c2
+        its low nibble, c3 colour RAM); unpainted pixels get the nearest of the four."""
         from .palette import PEPTO
 
         def dist(a, b):
@@ -703,6 +750,17 @@ class Converter:
         cov = self.sprite_cover()
         W, H = self.g.w, self.g.h
         bits = [[0] * W for _ in range(H)]
+        if self.g.mc:
+            for y in range(H):
+                for x in range(W):
+                    c1, c2, c3, bg = cols = self.pairs[y >> 3][x // 4]
+                    order = (bg, c1, c2, c3)
+                    c = self.img[y][x]
+                    if c in order:
+                        bits[y][x] = order.index(c)
+                    elif cov[y][x] is None:
+                        bits[y][x] = min(range(4), key=lambda i: dist(c, order[i]))
+            return bits
         for y in range(H):
             for x in range(W):
                 fg, bg = self.pairs[y >> 3][x >> 3]
@@ -719,6 +777,12 @@ class Converter:
         bits = self.bitmap()
         W, H = self.g.w, self.g.h
         out = [[0] * W for _ in range(H)]
+        if self.g.mc:
+            for y in range(H):
+                for x in range(W):
+                    c1, c2, c3, bg = self.pairs[y >> 3][x // 4]
+                    out[y][x] = cov[y][x] if cov[y][x] is not None else (bg, c1, c2, c3)[bits[y][x]]
+            return out
         for y in range(H):
             for x in range(W):
                 fg, bg = self.pairs[y >> 3][x >> 3]

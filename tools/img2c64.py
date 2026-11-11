@@ -48,10 +48,10 @@ usage: python3 tools/img2c64.py [-a {both,pal,ntsc,none}] [-b] [-c S] [-P FILE.v
               so twice the pixel width of -a's), one PNG pixel each: 160 wide for the full
               screen, multiples of 4. -s and -b still count screen pixels. Not with
               -d hybrid (its cells are hires cells); without -d the other dithers are
-              judged by the picture itself, each pixel doubled (there is no multicolour
-              converter yet; analysis/mc_estimate.py: it would show nearly every pixel).
-              The PNG's settings get "mode: multicolor". The build cannot convert these
-              yet and stops with a message.
+              judged by the picture itself, each pixel doubled (the converter shows
+              all but 0-0.6% of a multicolour picture's pixels, so it is not run).
+              The PNG's settings get "mode: multicolor", from which the build knows
+              it (version 4 .v2i; centred, without text or frame).
   -s WxH      fit WxH instead of 320x200 (multiples of 8; with -b, also inside 304x184)
   -l N        with -d hybrid: a line's colours outside their cell's pair must fit in at most
               N single colour runs of 24 pixels (the converter's sprites paint them; default
@@ -391,8 +391,8 @@ def save(out, dst, text):
 def candidate(img, system, name, dither, runs, frame, box, chroma, view=None, mc=False):
     """One dither tried for -w: (name, the output, its scores and wrong pixels), as the
     screen shows it (view, -P, or VICE's Colodore). Multicolour pictures are scored as
-    they are, each pixel doubled (no multicolour converter yet; it would show nearly every
-    pixel, analysis/mc_estimate.py), wrong pixels None."""
+    they are, each pixel doubled (the converter shows nearly every pixel of them, so it
+    is not run), wrong pixels None."""
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from vic2 import dither_pick
     out = convert(img, system, parse_dither(dither), frame, box, chroma, runs, view, mc)

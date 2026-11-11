@@ -1,7 +1,7 @@
 # vic2orious
 
-Converts C64-palette PNGs into C64 hires bitmap + per-line multiplexed hires sprites, aiming
-for pixel-perfect output, and plays the results on a real (emulated) C64: a slideshow PRG
+Converts C64-palette PNGs into C64 hires bitmap + per-line multiplexed hires sprites (or a
+multicolour bitmap with X-expanded sprites), aiming for pixel-perfect output, and plays the results on a real (emulated) C64: a slideshow PRG
 with the images embedded, a disk slideshow (`diskshow`) that loads every image in turn, a
 viewer PRG that loads `.v2i` image files (plus optional `.txt` narrative files drawn
 beside the picture) from disk by name, an interactive `ask` demo, and two smooth
@@ -16,7 +16,8 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   candidate that really schedules with the fewest wrong pixels wins), then for every raster
   line covers the remaining pixels with at most 8 single-colour 24-pixel "spans" (`cover`:
   exact max-pixels DP, memoised) and assigns them to the 8 sprites (DP over sprite subsets,
-  minimising register writes). `Geometry` holds size and screen placement.
+  minimising register writes). `Geometry` holds size and screen placement. Multicolour
+  (`mc=True`, img2c64 `-m` PNGs): see How it works.
 - `vic2/timing.py`: cycle model of the VIC-II bus stealing (badlines, sprite DMA, the 3
   write cycles allowed after BA goes low), the kernel code generator (prologue, sync phase)
   and the EDF write scheduler with per-line checkpoints. `set_standard("pal"|"ntsc")`
@@ -96,8 +97,7 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   `HYBRID_RUNS`), `-m` (multicolour: one PNG pixel per wide pixel, 160 wide for the full
   screen, multiples of 4, aspect stretch doubled; `-s`/`-b` still in screen pixels; no
   hybrid; the picker scores the picture itself, pixels doubled, no converter; settings get
-  `mode: multicolor`, `MODE_MC`, which `build.png_mode` reads: the build stops on such a
-  PNG until it can convert them). Hybrid's defaults (`-l 8`, `HYBRID_SPREAD` 0.1, `HYBRID_CLAMP` 64) changed
+  `mode: multicolor`, `MODE_MC`, which `build.png_mode`/`is_mc` read). Hybrid's defaults (`-l 8`, `HYBRID_SPREAD` 0.1, `HYBRID_CLAMP` 64) changed
   in Nov 2026. Each output PNG records the settings (`settings`: source name, aspect,
   fit, dither with hybrid's constants, chroma, palette) in a `tEXt` chunk `vic2orious`
   (`TEXT_KEY`), which the build copies into the `.v2i` metadata. Refuses to overwrite its input. `-b` only leaves
@@ -121,6 +121,23 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   only, gitignored). `build/` is generated and gitignored.
 
 ## How it works (the parts that are easy to break)
+
+- Multicolour (Nov 2026): the PNG is in wide pixels (img2c64 `-m`, `mode: multicolor`
+  in its settings, `build.png_mode`). `Geometry(mc=True)`: `w` in wide pixels, cells `cw`
+  = 4 wide, `scale` 2, `w_px` on screen; `xr(x)`/`xr_last(x)` map image columns to sprite
+  X (all X/window code goes through them, hires included). Cells get three colours plus
+  the background (`pairs` = (c1, c2, c3, bg), `mc_cands`: triples of the cell's
+  `MC_CANDS` commonest colours); the cover, assignment and scheduler are unchanged, in
+  image pixels: X-expanded hires sprites (`$d01d` = `$ff`, `$d016` = `$18` in the
+  prologue) paint 24 wide pixel single colour spans, and their pixel timing matched VICE
+  first time (0 differing pixels). Background black (`bg=0`): `00` shows `$d021` on the
+  whole screen, also around the image. `.v2i` version 4 (flags bit 1, `V2I_MC`):
+  background, colour RAM stream after the sprites; hires files stay version 3. The
+  build centres them and leaves out text, `.ask` and frame (they would be drawn in
+  multicolour); `expected` and `_expected.png` are in screen pixels (doubled).
+  `v2i_show` clears and fills colour RAM, `v2i_start` writes `v2i_bg` to `$d021`,
+  `v2i_stop` resets `$d01d`/`$d016`, `v2i_frame` skips them; diskshow and the viewer
+  check only "V2I" and leave the version to `v2i_show`.
 
 - An image with text (`name.txt` or `name.ask`, `has_text`) sits at the upper left by
   default (char row 0, column 0, so image line 0 is raster $33 and sprite X = 24 +
@@ -411,9 +428,10 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   for multicolour): 3+1 colours per 4x8 cell plus X-expanded sprites (24 wide pixel spans)
   shows its picture almost exactly (0-49 wrong pixels, even F-S); with F-S the blurred RMS
   vs the photo is 12.42 (hires F-S 13.59, hires hybrid 13.09), without or with light
-  dither hires is 0.4-1.0 closer. Plan: one code base, mode per image. Done: img2c64 `-m`;
-  next the converter (cell triples + background, X-expanded spans, timing), then `.v2i`
-  and `v2i.inc`.
+  dither hires is 0.4-1.0 closer. Built (one code base, mode per image): with timing,
+  F-S photos lost 0-98 pixels (PAL) with the background chosen per image (the
+  commonest of 3 leaving the fewest pixels outside cell triples; grey on these photos),
+  1-509 (0-1.6%) with black, which was kept (the screen around the image stays black).
 
 ## Ideas not done yet
 

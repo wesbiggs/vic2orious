@@ -6,14 +6,15 @@ Four panels (2x2, scaled 3x like _compare.png), all in image coordinates:
   ------------------------+---------------------------------------
   sprites by number       | heat map, and sprites in use per line
 
-- Bitmap alone: what the screen shows with the sprites off (each cell's two colours).
+- Bitmap alone: what the screen shows with the sprites off (each cell's two colours;
+  multicolour: its three and the background). Multicolour panels are in wide pixels.
 - Sprite pixels alone: the colours the sprites paint (topmost sprite wins, as on the
   VIC), on a grey checkerboard where no sprite paints.
 - Sprites by number: each sprite's 24 pixel window on every line in its own hue
   (SPRITE_HUES), bright where it paints, dim where it is positioned but transparent.
   Sprite 0 is on top.
 - Heat map: sprite-painted pixels per 8x8 cell, black (none) through blue, cyan, yellow
-  to red (all 64). The bar to its right is the number of sprites painting on each line
+  to red (all 64; multicolour cells, 4x8 wide pixels, count double). The bar to its right is the number of sprites painting on each line
   (0-8, 3 px each), with a red tick right of it on lines that are not pixel perfect.
 """
 
@@ -63,9 +64,15 @@ def sprite_layers(conv, path):
     cov = conv.sprite_cover()
     wins = windows(conv)
 
+    cw = g.cw
+
+    def bmp_colour(y, x):
+        p = conv.pairs[y >> 3][x // cw]
+        if g.mc:
+            return (p[3], p[0], p[1], p[2])[bits[y][x]]
+        return p[0 if bits[y][x] else 1]
     bmp = Image.new("RGB", (w, h))
-    bmp.putdata([PEPTO[conv.pairs[y >> 3][x >> 3][0 if bits[y][x] else 1]]
-                 for y in range(h) for x in range(w)])
+    bmp.putdata([PEPTO[bmp_colour(y, x)] for y in range(h) for x in range(w)])
 
     spr = Image.new("RGB", (w, h))
     spr.putdata([PEPTO[cov[y][x]] if cov[y][x] is not None
@@ -88,9 +95,9 @@ def sprite_layers(conv, path):
     for y in range(h):
         for x in range(w):
             if cov[y][x] is not None:
-                cells[y >> 3][x >> 3] += 1
+                cells[y >> 3][x // cw] += 8 // cw
     hm = Image.new("RGB", (w + BAR, h), (24, 24, 24))
-    hm.putdata([heat(cells[y >> 3][x >> 3]) if x < w else (24, 24, 24)
+    hm.putdata([heat(cells[y >> 3][x // cw]) if x < w else (24, 24, 24)
                 for y in range(h) for x in range(w + BAR)])
     px = hm.load()
     for y in range(h):
