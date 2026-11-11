@@ -66,6 +66,8 @@ PNGS    := $(sort $(foreach p,$(or $(strip $(IMAGES)),$(wildcard input/*.png)),\
 SFX_pal := -p
 SFX_ntsc:= -n
 src      = $(firstword $(wildcard $(basename $(2))$(SFX_$(1)).png) $(2))
+# txtsrc: the same for its text (.txt) or .ask: name-p.txt / name-n.txt, else name.txt
+txtsrc   = $(firstword $(wildcard $(basename $(2))$(SFX_$(1))$(3)) $(basename $(2))$(3))
 jsons    = $(foreach p,$(PNGS),$(DIR_$(1))/$(basename $(notdir $(p))).json)
 JSONS   := $(foreach s,$(SYSTEMS),$(call jsons,$(s)))
 SOURCES := $(wildcard input/* vic2/*.py asm/*) $(FONTFILE)
@@ -91,7 +93,7 @@ build: $(STAMP)
 convert: $(JSONS)
 
 define system_rules
-$(foreach p,$(PNGS),$(eval $(DIR_$(1))/$(basename $(notdir $(p))).json: $(call src,$(1),$(p)) $(wildcard $(basename $(p)).txt $(basename $(p)).ask)))
+$(foreach p,$(PNGS),$(eval $(DIR_$(1))/$(basename $(notdir $(p))).json: $(call src,$(1),$(p)) $(wildcard $(call txtsrc,$(1),$(p),.txt) $(call txtsrc,$(1),$(p),.ask))))
 $(call jsons,$(1)): $(wildcard vic2/*.py) $(FONTFILE) $(DIR_$(1))/.copts
 	$(PYTHON) -m vic2.build --convert-only $(COPTS_$(1)) $$(filter %.png,$$^)
 endef
