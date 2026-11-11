@@ -53,7 +53,9 @@ python3 tools/img2c64.py art.png -a none -o input/art.png   # as is, no stretch,
   `-a ntsc` only one; `-a none` keeps the shape (for pixel art drawn at C64 size). The
   build treats `name-p.png` and `name-n.png` as image `name`: a PAL build uses
   `name-p.png` and an NTSC build `name-n.png`, each falling back to `name.png` (an error
-  if that is missing too). The story and questions stay `name.txt` / `name.ask`.
+  if that is missing too). The story and questions work the same way: `name-p.txt` /
+  `name-n.txt` (and `.ask`) if they exist, else `name.txt` / `name.ask`, so a system whose
+  picture is wider (NTSC) can have a shorter story.
 - `-o` takes a file name (default `out.png`) or a directory (one that exists, or a path
   ending in `/`), where each picture keeps its name with a `.png` extension. Several
   inputs or a glob pattern need a directory.
@@ -130,7 +132,10 @@ Generated files go to `build/prg/` (`<name>-p.png` and `<name>-n.png` are 16-col
 
 Put the text in `input/<name>.txt`: paragraphs separated by blank lines, a first line
 starting with `# ` becomes the title. It is wrapped to fit the space to the right of the image (or
-below a very wide image); the build tells you if it does not fit.
+below a very wide image); the build tells you if it does not fit. An NTSC picture is
+wider than its PAL version (NTSC pixels are narrower), leaving less room: `input/<name>-n.txt`
+replaces the story there (and `-p.txt` on PAL). The castle, gaoler and princess examples
+have shorter NTSC stories.
 
 ### Fonts
 

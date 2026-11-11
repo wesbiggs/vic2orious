@@ -11,8 +11,10 @@ A PAL build goes to build/pal/, an NTSC build to build/ntsc/, so both can be kep
 
 Images are named by their input/<name>.png. A PAL build converts input/<name>-p.png
 instead when it exists, an NTSC build input/<name>-n.png (tools/img2c64.py writes these,
-with the width stretched for each system's pixel shape); the name, texts, .ask and disk
-names stay <name>. Naming a -p/-n file on the command line means its <name>.
+with the width stretched for each system's pixel shape); the name and disk names stay
+<name>. Naming a -p/-n file on the command line means its <name>. Texts work the same:
+input/<name>-p.txt / -n.txt (and .ask) when they exist, else input/<name>.txt, so a
+system whose image is wider can have a shorter story.
 
 Images with a story or an .ask sit at the upper left (row 1, column 1 with -b), leaving
 the rest of the screen for the text; images without one, and the image of the v2i demo,
@@ -166,13 +168,19 @@ def image_source(path, standard=None):
     return None
 
 
+def text_source(path, ext, standard=None):
+    """Image path's text with extension ext (".txt", ".ask") on standard (default: the
+    current one): input/<name>-p<ext> / -n<ext> if there is one, else input/<name><ext>.
+    None if neither exists. Lets a system have its own story for its own image size."""
+    return image_source(os.path.splitext(path)[0] + ext, standard)
+
+
 def has_text(path):
     """Whether image path comes with text to show beside it (a story or an ask demo). Not
     multicolour images: the text would be drawn in multicolour (wide, wrong colours)."""
     if is_mc(path):
         return False
-    base = os.path.splitext(path)[0]
-    return any(os.path.exists(base + e) for e in (".txt", ".ask"))
+    return any(text_source(path, e) for e in (".txt", ".ask"))
 
 
 def place(cols, rows, frame, at, centre):
@@ -249,11 +257,11 @@ def convert_image(path, log=print, frame=False, leading=TEXT_LEADING, at=None, f
         log_stats(inf, log, cached=True)
     else:
         inf = convert_new(src, name, key, log, frame, at, centre)
-    txt = os.path.splitext(path)[0] + ".txt"
-    if os.path.exists(txt) and inf["geom"].mc and not suffix:
+    txt = text_source(path, ".txt")
+    if txt and inf["geom"].mc and not suffix:
         log("  %s: multicolour, its text is left out" % name)
     inf["txt"] = (make_text(txt, inf["geom"], name, log, leading)
-                  if os.path.exists(txt) and not suffix and not inf["geom"].mc else None)
+                  if txt and not suffix and not inf["geom"].mc else None)
     return inf
 
 
@@ -745,11 +753,11 @@ the row boundary the raster IRQ switches banks and resets the fine scroll."""
 
 
 def stories(images):
-    """The text of every image's story (input/<name>.txt), in image order."""
+    """The text of every image's story (input/<name>.txt, text_source), in image order."""
     texts = []
     for p in images:
-        t = os.path.splitext(p)[0] + ".txt"
-        if os.path.exists(t):
+        t = text_source(p, ".txt")
+        if t:
             with open(t) as f:
                 texts.append(f.read())
     return texts
@@ -1031,8 +1039,8 @@ def build_system(a, images, at, standard):
     demos.append((stream, "stream demo"))
     asks = []
     for img_path, inf in zip(images, infos):
-        path = os.path.splitext(img_path)[0] + ".ask"
-        if os.path.exists(path):
+        path = text_source(img_path, ".ask")
+        if path:
             if inf["geom"].mc:
                 print("  ask %s: multicolour image, skipped" % inf["name"])
                 continue

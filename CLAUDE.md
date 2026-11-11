@@ -117,7 +117,12 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   converts instead: `image_name` maps either to `name.png`, `image_source` picks the file
   per system, falling back to `name.png`; main errors if neither exists; the Makefile's
   `src` does the same for the json dependencies), optional stories (`name.txt`) and optional demo questions
-  (`name.ask`, builds `build/pal/ask-name.prg`). `images/` holds older test images (local
+  (`name.ask`, builds `build/pal/ask-name.prg`); texts too can be per system
+  (`name-p.txt`/`name-n.txt`, `.ask` likewise: `text_source`, Makefile `txtsrc`; the dual
+  disk then gets `NAME-P.TXT`/`NAME-N.TXT`, `dual_texts`). The castle, gaoler and princess
+  examples are `-p` (the originals, Pepto) and `-n` (Nov 2026: widened by 0.936/0.75 with
+  Lanczos, 4x oversampled, re-dithered by img2c64 `-a none -P pepto.vpl -s WxH`, castle
+  144x200, the others 160x128) with shorter `-n.txt` stories (the text area is narrower). `images/` holds older test images (local
   only, gitignored). `build/` is generated and gitignored.
 
 ## How it works (the parts that are easy to break)
