@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  # every branch push (a pull request shows its head commit's checks; pull requests from
+  # forks are not run); tags run release.yml, which calls this workflow
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  verify:
+    name: Build and verify in VICE (PAL, NTSC, dual disk)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-toolchain
+
+      - name: Byte-compile the Python sources
+        run: python -m compileall -q vic2 tools analysis
+
+      - name: Convert the images (PAL and NTSC, in parallel)
+        run: make -j"$(nproc)" convert DUAL=1
+
+      # --dual --verify checks both systems' images, texts, ask and demos, then boots the
+      # dual diskshow, viewer and v2i demo in PAL and NTSC VICE: every check must report
+      # 0 differing pixels, otherwise the build exits non-zero
+      - name: Build and verify
+        run: make verify DUAL=1
+
+      - name: Package
+        run: tools/dist.sh "${GITHUB_REF_NAME//\//-}" dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+      - name: Upload the build directory (screenshots, models) on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-failed
+          path: build/
+          if-no-files-found: ignore
+
+  prg:
+    name: One-picture PRGs (vic2.prg, hires and multicolour)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-toolchain
+
+      - name: Hires PRG, PAL and NTSC
+        run: python -m vic2.prg -d none --verify -o build/prg/princess.prg input/princess-p.png
+
+      - name: Multicolour PRG, PAL and NTSC
+        run: python -m vic2.prg -m -d none --verify -o build/prg/princess-mc.prg input/princess-p.png
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: prg
+          path: build/prg/
+          if-no-files-found: ignore

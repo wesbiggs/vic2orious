@@ -4,3 +4,4 @@ images/
 fonts/
 .DS_Store
 tools/*.png
+dist/

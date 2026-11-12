@@ -1,0 +1,72 @@
+name: Set up the vic2orious toolchain
+description: >
+  Python with Pillow and numpy, cc65, and a headless VICE (x64sc, c1541) built from the
+  upstream source (which, unlike Debian's package, includes the C64 ROMs). The VICE build
+  is cached in the tool cache; sets VICE_DATA for vic2/font.py.
+
+inputs:
+  vice-version:
+    description: VICE release to build
+    default: "3.10"
+  python-version:
+    description: Python version
+    default: "3.12"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Python packages
+      shell: bash
+      run: python -m pip install --quiet pillow numpy
+
+    - name: cc65 and VICE build dependencies
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq --no-install-recommends cc65 \
+          build-essential flex bison xa65 dos2unix texinfo libpng-dev zlib1g-dev
+
+    - name: VICE install directory
+      id: dir
+      shell: bash
+      run: echo "vice=$RUNNER_TOOL_CACHE/vice/${{ inputs.vice-version }}" >> "$GITHUB_OUTPUT"
+
+    - name: Cache VICE
+      id: cache-vice
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.dir.outputs.vice }}
+        key: vice-${{ inputs.vice-version }}-headless-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/actions/setup-toolchain/action.yml') }}
+
+    - name: Build VICE ${{ inputs.vice-version }} (headless)
+      if: steps.cache-vice.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        VER: ${{ inputs.vice-version }}
+        PREFIX: ${{ steps.dir.outputs.vice }}
+      run: |
+        set -euo pipefail
+        cd "$RUNNER_TEMP"
+        curl -fsSL --retry 5 --retry-delay 10 -o vice.tar.gz \
+          "https://downloads.sourceforge.net/project/vice-emu/releases/vice-$VER.tar.gz"
+        tar xzf vice.tar.gz
+        cd "vice-$VER"
+        ./configure --prefix="$PREFIX" --enable-headlessui --disable-html-docs \
+          --disable-pdf-docs --without-pulse --without-alsa --without-libcurl --with-png \
+          > configure.log 2>&1 || { tail -50 configure.log; exit 1; }
+        make -j"$(nproc)" > make.log 2>&1 || { tail -80 make.log; exit 1; }
+        make install > install.log 2>&1 || { tail -50 install.log; exit 1; }
+
+    - name: Put VICE on the path
+      shell: bash
+      env:
+        PREFIX: ${{ steps.dir.outputs.vice }}
+      run: |
+        echo "$PREFIX/bin" >> "$GITHUB_PATH"
+        echo "VICE_DATA=$PREFIX/share/vice/C64" >> "$GITHUB_ENV"
+        ls "$PREFIX/bin/x64sc" "$PREFIX/bin/c1541" \
+          "$PREFIX/share/vice/C64/chargen-901225-01.bin" "$PREFIX/share/vice/C64/pepto-pal.vpl"

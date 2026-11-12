@@ -1,0 +1,37 @@
+name: Release
+
+# Push a tag like v1.0 (or v1.1-rc1 for a prerelease) to build, verify and publish.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: ci
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          ls -l dist
+          pre=()
+          [[ "$TAG" == *-* ]] && pre=(--prerelease)
+          gh release create "$TAG" dist/* --title "vic2orious $TAG" \
+            --notes-file CHANGELOG.md --verify-tag "${pre[@]}"

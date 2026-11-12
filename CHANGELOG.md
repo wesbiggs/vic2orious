@@ -18,4 +18,5 @@ Turn any picture into a C64 hires or multicolour bitmap with multiplexed sprites
 - **GEOS fonts** for v2t (`make FONT=...`; bring your own, none are included).
 - **Demos:** smooth scroll (`make run-scroll`) and a stream demo with C64-side word wrap (`make run-stream`).
 - **Build:** per-image conversion cache with `make -j`, `FAST=1` for instant disk loading in VICE, and a `_sprites.png` view of sprite use for each conversion.
+- **CI and releases:** GitHub Actions builds everything and verifies it pixel for pixel in a headless VICE on pushes to main and pull requests; a `v*` tag publishes the dual disk, PAL and NTSC programs and the libraries. `VICE_DATA` points the build at VICE's data directory on any system.
 - **File formats:** .v2i version 5 (hires and multicolour; thumbnail and metadata before the kernel), and .v2t version 4.

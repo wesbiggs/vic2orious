@@ -365,8 +365,17 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   changes, change `vic2/screen.py` to match.
 - Keys in the demo and space in the viewer are read from the CIA matrix, so VICE
   `-keybuf` cannot press them (it only feeds the KERNAL buffer).
-- Requires Python 3 with Pillow, cc65 (`cl65`), VICE (`x64sc`, `c1541`). The VICE palette
-  and character ROM paths are hardcoded for Homebrew (`/opt/homebrew/share/vice/C64/`).
+- Requires Python 3 with Pillow, cc65 (`cl65`), VICE (`x64sc`, `c1541`). The character
+  ROM is read from `$VICE_DATA`, else the first of Homebrew's and the usual Linux VICE data
+  directories that has it (`font.vice_file`, `VICE_DIRS`).
+- CI (`.github/workflows/ci.yml`, on pushes to any branch and manually): Ubuntu with apt's
+  cc65 and a headless VICE built from upstream source (Debian's lacks the ROMs), cached
+  (`.github/actions/setup-toolchain`); `make convert DUAL=1` in parallel, then
+  `make verify DUAL=1` (fails on any differing pixel), `vic2.prg --verify` hires and
+  `-m`, and `tools/dist.sh` packages the build as artifact `dist`. Release
+  (`release.yml`): pushing a tag `v*` runs CI, then publishes `dist` (dual disk, PAL and
+  NTSC zips, the libraries with their docs) as a GitHub release with `CHANGELOG.md` as the
+  notes (a tag with `-` is a prerelease).
 - VICE notes: screenshots are not exactly Pepto even with `-VICIIpalette pepto-pal.vpl`, so
   `compare_screenshot` maps colours by majority vote. Disk loading works with true drive
   emulation (the default; a 12-16K image takes ~25M cycles, the viewer test with autostart

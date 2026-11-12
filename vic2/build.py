@@ -59,7 +59,6 @@ V2T_VERSION = 4
 TEXT_LEADING = 2              # default pixel lines between text lines (--leading)
 TEXT_TITLE = (1 << 4) | 0     # "# " lines: white on black
 TEXT_BODY = (15 << 4) | 0     # light grey on black
-VPL = "/opt/homebrew/share/vice/C64/pepto-pal.vpl"
 FRAME = (1, 1, 0, 1)          # frame rings from the outside in (palette indices)
 
 

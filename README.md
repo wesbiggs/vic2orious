@@ -28,8 +28,10 @@ get closer to pixel perfect.
 
 - Python 3 with [Pillow](https://pypi.org/project/pillow/)
 - [cc65](https://cc65.github.io/) (`cl65`)
-- [VICE](https://vice-emu.sourceforge.io/) (`x64sc`, `c1541`), installed with Homebrew
-  (by default, the build reads its palette and character ROM from `/opt/homebrew/share/vice/C64/`)
+- [VICE](https://vice-emu.sourceforge.io/) (`x64sc`, `c1541`). The build reads the
+  character ROM from VICE's C64 data directory: `$VICE_DATA` if set, else the first of
+  `/opt/homebrew/share/vice/C64`, `/usr/local/share/vice/C64`, `/usr/share/vice/C64` and
+  `/usr/lib/vice/C64` that has it (Debian and Ubuntu's `vice` package ships without the ROMs)
 
 ## 1. Prepare an image
 

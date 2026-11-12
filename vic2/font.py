@@ -8,7 +8,21 @@ the font for the whole process (like timing.set_standard); `current` returns it.
 
 import os
 
-CHARGEN = "/opt/homebrew/share/vice/C64/chargen-901225-01.bin"
+# VICE's C64 data directory (character ROM, palettes): $VICE_DATA, else the first of these
+# that exists (Homebrew on Apple silicon and Intel, then the usual Linux prefixes)
+VICE_DIRS = ("/opt/homebrew/share/vice/C64", "/usr/local/share/vice/C64",
+             "/usr/share/vice/C64", "/usr/lib/vice/C64")
+CHARGEN_NAME = "chargen-901225-01.bin"
+
+
+def vice_file(name):
+    """Path of one of VICE's C64 data files (the first directory that has it)."""
+    dirs = [os.environ["VICE_DATA"]] if os.environ.get("VICE_DATA") else list(VICE_DIRS)
+    for d in dirs:
+        if os.path.exists(os.path.join(d, name)):
+            return os.path.join(d, name)
+    raise SystemExit("%s not found in %s (set VICE_DATA to VICE's C64 data directory)"
+                     % (name, ", ".join(dirs)))
 FIRST, COUNT = 32, 96   # glyphs for character codes 32..127, as in GEOS
 SPACE_ADVANCE = 4
 SPACING = 1
@@ -140,8 +154,9 @@ class Font:
         return "\n".join(out) + "\n"
 
 
-def rom_font(path=CHARGEN):
+def rom_font(path=None):
     """The ROM lower/upper case set as an 8 pixel font, ASCII codes 32..127."""
+    path = path or vice_file(CHARGEN_NAME)
     if not os.path.exists(path):
         raise SystemExit("character ROM not found: %s" % path)
     with open(path, "rb") as f:
