@@ -368,7 +368,7 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 - Requires Python 3 with Pillow, cc65 (`cl65`), VICE (`x64sc`, `c1541`). The character
   ROM is read from `$VICE_DATA`, else the first of Homebrew's and the usual Linux VICE data
   directories that has it (`font.vice_file`, `VICE_DIRS`).
-- CI (`.github/workflows/ci.yml`, on pushes to any branch and manually): Ubuntu with apt's
+- CI (`.github/workflows/ci.yml`, on pushes to main, pull requests and manually): Ubuntu with apt's
   cc65 and a headless VICE built from upstream source (Debian's lacks the ROMs), cached
   (`.github/actions/setup-toolchain`); `make convert DUAL=1` in parallel, then
   `make verify DUAL=1` (fails on any differing pixel), `vic2.prg --verify` hires and
