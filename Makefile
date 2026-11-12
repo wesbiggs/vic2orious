@@ -37,6 +37,8 @@ PALETTE ?=                      # prg: FILE.vpl, choose colours as a screen with
 SIZE    ?=                      # prg: WxH to fit instead of 320x200 (multiples of 8)
 LINES   ?=                      # prg: N|none, hybrid's line budget (img2c64 -l; default
                                 #   8, none to turn it off; needs DITHER=hybrid)
+MC      ?=                      # prg: 1, multicolour picture (img2c64 -m; not with
+                                #   DITHER=hybrid)
 
 # build directories: SYS for the programs with images in them (build/pal/, build/ntsc/),
 # B for the disk with diskshow and viewer (build/dual/ with DUAL=1); VICE's video system
@@ -151,7 +153,8 @@ prg:
 		$(if $(strip $(CHROMA)),-c $(strip $(CHROMA))) \
 		$(if $(strip $(PALETTE)),-P $(strip $(PALETTE))) \
 		$(if $(strip $(SIZE)),-s $(strip $(SIZE))) \
-		$(if $(strip $(LINES)),-l $(strip $(LINES))) $(strip $(PIC))
+		$(if $(strip $(LINES)),-l $(strip $(LINES))) \
+		$(if $(strip $(MC)),-m) $(strip $(PIC))
 
 clean:
 	rm -rf build
@@ -177,7 +180,8 @@ help:
 	@echo "                    fs:K|atkinson[:K]|hybrid[:E], CHROMA=S (e.g. DITHER=hybrid"
 	@echo "                    CHROMA=0.6), PALETTE=FILE.vpl (colours as that screen"
 	@echo "                    shows them), SIZE=WxH (fit that instead of 320x200),"
-	@echo "                    LINES=N|none (hybrid's line budget, default 8)"
+	@echo "                    LINES=N|none (hybrid's line budget, default 8), MC=1"
+	@echo "                    (multicolour: half the width, 3 colours per cell + black)"
 	@echo "make clean          remove build/ (PAL, NTSC and dual builds)"
 	@echo "options: IMAGES='input/a.png ...' FRAME=1 AT=COLUMN,ROW LEADING=n AUTO=n HOLD=n DISK=d64|d81"
 	@echo "         FONT=fonts/NAME.cvt[:SIZE] (GEOS font for the texts; bring your own)"

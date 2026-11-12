@@ -115,10 +115,12 @@ python3 -m vic2.prg /path/to/my_image.png               # my_image.prg in this d
 python3 -m vic2.prg photo.jpg -o out/photo.prg --verify  # check both in VICE
 python3 -m vic2.prg logo.png -d none -s 160x96          # no dithering, at most 160x96
 python3 -m vic2.prg photo.jpg -d hybrid -c 0.6          # fewer wrong pixels on photos
+python3 -m vic2.prg photo.jpg -m                        # multicolour
 make prg PIC=/path/to/my_image.png                       # the same as the first
 make prg PIC=logo.png DITHER=none SIZE=160x96            # and the third
 make prg PIC=photo.jpg DITHER=hybrid CHROMA=0.6           # and the fourth
 make prg PIC=photo.jpg DITHER=hybrid LINES=none           # hybrid without its line budget
+make prg PIC=photo.jpg MC=1                               # multicolour, as the fifth
 ```
 
 Generated files go to `build/prg/` (`<name>-p.png` and `<name>-n.png` are 16-color target images, and the conversions are placed in

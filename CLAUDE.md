@@ -29,10 +29,11 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   system: `build/pal/`, `build/ntsc/` (`build/dual/` for the dual disk). The file formats
   are documented in its docstring.
 - `vic2/prg.py`: one picture -> `<name>.prg` (cwd, or `-o`) for PAL and NTSC: runs
-  img2c64 (`-d`, `-w`, `-c`, `-P`, `-s`, `-l` passed on, else its defaults: it picks the dither) into `build/prg/<name>-p/-n.png`, converts each (centred) into
+  img2c64 (`-d`, `-w`, `-c`, `-P`, `-s`, `-l`, `-m` passed on, else its defaults: it picks the dither) into `build/prg/<name>-p/-n.png`, converts each (centred) into
   `build/prg/pal|ntsc/` (sets `build.BUILD` itself, cached as in the build) and assembles
   `v2i-demo.s` with `DUAL=1`. `--verify` checks both in VICE, `--run [pal|ntsc]`;
-  `make prg PIC=path [DITHER=mode] [CHROMA=S] [PALETTE=F.vpl] [SIZE=WxH] [LINES=N|none]`.
+  `make prg PIC=path [DITHER=mode] [CHROMA=S] [PALETTE=F.vpl] [SIZE=WxH] [LINES=N|none] [MC=1]`
+  (`-m`, multicolour: PAL and NTSC of a 160x200 photo fit one PRG, ~37K).
 - `vic2/dither_pick.py`: the dither recommender's metrics (blurred RMS, SSIM of the
   luma, a*b* colour error), `rank` and `CANDIDATES`; img2c64 without `-d` and
   `analysis/dither_rank.py` use it. Imported only for that (numpy).
