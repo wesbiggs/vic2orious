@@ -1,9 +1,9 @@
 """Scoring img2c64 pictures for the dither recommender (img2c64 without -d, and
 analysis/dither_rank.py).
 
-An img2c64 output goes through the converter (upper left, like dither_rank; the build's
-placement can move a few spans); what the C64 shows is compared with the source, resized
-to the same size:
+An img2c64 output goes through the converter (shown: upper left, like dither_rank; the
+build's placement can move a few spans), or its quick estimate (estimate, img2c64 -t);
+what the C64 shows is compared with the source, resized to the same size:
 
   rms    3x3-blurred RMS error (RGB, 0-255); lower is better
   ssim   mean SSIM of the luma (Rec. 601; 11x11 Gaussian window, sigma 1.5, the usual
@@ -44,6 +44,45 @@ def shown(out, system, view=None):
     conv.run()
     rows = conv.render()
     wrong = sum(rows[y][x] != img[y][x] for y in range(h) for x in range(w))
+    pal = view or (COLODORE_VICE_PAL if system == "pal" else COLODORE_VICE_NTSC)
+    return Image.fromarray(np.asarray(pal, dtype=np.uint8)[np.array(rows)]), wrong
+
+
+def estimate(out, system, view=None):
+    """A quick stand-in for shown (img2c64 -t): each cell's two commonest colours (no cell
+    search), each line's other pixels covered by at most 8 spans (the converter's exact
+    cover) as if every span fitted (no sprite assignment or timing); the pixels left over
+    get the nearer of the cell's two colours, as in Converter.bitmap. About a thousandth
+    of the converter's time; it misses what the cell search gains and what timing loses."""
+    from .palette import PEPTO
+    system = system or "pal"
+    timing.set_standard(system)
+    w, h = out.size
+    flat = [KNOWN[tuple(p)] for p in np.asarray(out).reshape(-1, 3).tolist()]
+    img = [flat[y * w:(y + 1) * w] for y in range(h)]
+    conv = convert.Converter(img, log=lambda *a: None)
+    pairs = []
+    for cnts in conv.cell_colors:
+        row = []
+        for cnt in cnts:
+            cols = sorted(cnt, key=lambda c: -cnt[c])
+            row.append((cols[0], cols[1 if len(cols) > 1 else 0]))
+        pairs.append(row)
+
+    def dist(a, b):
+        return sum((p - q) ** 2 for p, q in zip(PEPTO[a], PEPTO[b]))
+    rows, wrong = [], 0
+    for y in range(h):
+        rp = pairs[y >> 3]
+        spans, _ = conv.spans_of(y, rp)
+        painted = {x for _, _, _, xs in spans for x in xs}
+        line = list(img[y])
+        for x, c in enumerate(line):
+            fg, bg = rp[x >> 3]
+            if c != fg and c != bg and x not in painted:
+                line[x] = fg if dist(c, fg) < dist(c, bg) else bg
+                wrong += 1
+        rows.append(line)
     pal = view or (COLODORE_VICE_PAL if system == "pal" else COLODORE_VICE_NTSC)
     return Image.fromarray(np.asarray(pal, dtype=np.uint8)[np.array(rows)]), wrong
 

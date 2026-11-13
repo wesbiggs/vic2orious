@@ -26,10 +26,18 @@ usage: python3 tools/img2c64.py [-a {both,pal,ntsc,none}] [-b] [-c S] [-P FILE.v
               atkinson:0.75, hybrid with -l 8, 6 and none), run each result through the
               converter and keep the one whose C64 picture is closest to the source, by
               these weights for the 3x3-blurred RMS error, SSIM and colour (a*b*) error
-              (default 0,1,1; vic2/dither_pick.py, analysis/README.md). Prints the pick
-              and the runners-up. Takes the repo's vic2 package and numpy, and about 40 s
+              (default 0,1,1; vic2/dither_pick.py, analysis/README.md). Prints each
+              dither's metrics as it finishes (with wrong pixels and CPU time), then
+              the ranking and the pick. Takes the repo's vic2 package and numpy, and about 40 s
               of CPU per dither and picture (the converter; run in parallel: about 50 s a
-              picture and system on 12 cores).
+              picture and system on 12 cores), so by default only the best 3 by a quick
+              estimate go through it (see -t).
+  -t N        without -d: rank the dithers first by an estimate of the converter
+              (vic2/dither_pick.py estimate: each cell's two commonest colours, each line's
+              other pixels covered by up to 8 spans as if every one fitted; about 0.1 s)
+              and convert only the best N (default 3); all converts every one, as before
+              (kodim13: the estimate's top two were the converter's, PAL and NTSC). Not
+              used with -m, which never runs the converter.
   -c S        choose colours as if the palette had S times its saturation (default 1;
               0 < S <= 2); the output still has the real colours. Photos are rarely as
               saturated as the C64's colours: at 1 their reds, browns and blues fall to
@@ -84,7 +92,8 @@ import glob
 import io
 import os
 import sys
-from concurrent.futures import ProcessPoolExecutor
+import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from PIL import Image, ImageCms, ImageOps, PngImagePlugin
 
@@ -125,6 +134,7 @@ KERNELS = {
 HYBRID_CLAMP = 64       # hybrid: carried error per channel at most this
 HYBRID_SPREAD = 0.1     # hybrid: cost of mixing far apart colours when picking a cell's pair
 HYBRID_RUNS = 8         # hybrid: default -l
+TOP = 3                 # picker: default -t
 HYBRID_NEAR = 4         # hybrid: pair candidates are the cell pixels' 4 nearest colours
 SPAN_W = 24             # -l: width of a run of colours outside the cell pair (a sprite)
 
@@ -406,30 +416,85 @@ def save(out, dst, text, thumb=None):
     out.save(dst, icc_profile=SRGB_ICC, pnginfo=info)
 
 
-def candidate(img, system, name, dither, runs, frame, box, chroma, view=None, mc=False):
-    """One dither tried for -w: (name, the output, its scores and wrong pixels), as the
-    screen shows it (view, -P, or VICE's Colodore). Multicolour pictures are scored as
-    they are, each pixel doubled (the converter shows nearly every pixel of them, so it
-    is not run), wrong pixels None."""
+def judge(img, out, system, view, mc, quick):
+    """The scores and wrong pixels of output out against picture img, as the screen shows
+    it (view, -P, or VICE's Colodore): through the converter, or with quick its estimate
+    (dither_pick.estimate, -t). Multicolour pictures are scored as they are, each pixel
+    doubled (the converter shows nearly every pixel of them, so it is not run), wrong
+    pixels None."""
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from vic2 import dither_pick
-    out = convert(img, system, parse_dither(dither), frame, box, chroma, runs, view, mc)
     if mc:
         c64, wrong = out.resize((2 * out.width, out.height), Image.Resampling.NEAREST), None
     else:
-        c64, wrong = dither_pick.shown(out, system, view)
+        c64, wrong = (dither_pick.estimate if quick else dither_pick.shown)(out, system, view)
     r = dither_pick.scores(c64, img.resize(c64.size, Image.Resampling.LANCZOS))
-    r.update(setting=name, dither=dither, runs=runs, wrong=wrong)
+    r.update(wrong=wrong, pixels=out.width * out.height)
+    return r
+
+
+def candidate(img, system, name, dither, runs, frame, box, chroma, view=None, mc=False,
+              quick=False):
+    """One dither tried for -w: (its scores and wrong pixels, the output); quick: scored
+    by the converter's estimate (judge)."""
+    t0 = time.process_time()
+    out = convert(img, system, parse_dither(dither), frame, box, chroma, runs, view, mc)
+    r = judge(img, out, system, view, mc, quick)
+    r.update(setting=name, dither=dither, runs=runs, secs=time.process_time() - t0)
     return r, out
 
 
-def pick(futures, weights):
-    """The best of a picture's candidates: (result, output, ranked results)."""
+def refine(img, out, est, system, view):
+    """-t: a candidate the estimate ranked high (est, its result), through the converter."""
+    t0 = time.process_time()
+    r = judge(img, out, system, view, False, False)
+    r.update(setting=est["setting"], dither=est["dither"], runs=est["runs"],
+             secs=time.process_time() - t0)
+    return r, out
+
+
+def describe(r):
+    """A candidate's metrics, wrong pixels and CPU time, for the picker's log."""
+    wrong = ("wrong %5.1f%%" % (100.0 * r["wrong"] / r["pixels"])
+             if r["wrong"] is not None else "")
+    return "%-14s rms %6.2f  ssim %.4f  color %6.2f  %-12s cpu %5.1f s%s" % (
+        r["setting"], r["rms"], r["ssim"], r["color"], wrong, r["secs"],
+        "  (estimate)" if r.get("estimate") else "")
+
+
+def pick(futures, weights, label, extra=()):
+    """A picture's candidates ranked: (ranked results, {setting: output}), best first.
+    Logs each candidate as it finishes, then the ranking (the score is relative to the
+    others, so known only at the end), to stdout; label names the picture (and stage).
+    extra: -t's estimates of the dithers not converted, ranked along (marked "estimate"),
+    so the metrics are scaled over all the dithers as without -t (scaled over the
+    converted few alone, a near tie between two of them could go either way)."""
     from vic2 import dither_pick
-    done = [f.result() for f in futures]
+    done = []
+    for n, f in enumerate(as_completed(futures), 1):
+        done.append(f.result())
+        print("  %s [%d/%d] %s" % (label, n, len(futures), describe(done[-1][0])),
+              flush=True)
     outs = {r["setting"]: out for r, out in done}
-    ranked = dither_pick.rank([r for r, _ in done], weights)
-    return ranked[0], outs[ranked[0]["setting"]], ranked
+    ranked = dither_pick.rank([r for r, _ in done] + [dict(r, estimate=True) for r in extra],
+                              weights)
+    print("  %s ranked (weights rms %g, ssim %g, color %g):" % ((label,) + tuple(weights)))
+    for i, r in enumerate(ranked, 1):
+        print("    %d. score %.3f  %s" % (i, r["score"], describe(r)))
+    return ranked, outs
+
+
+def parse_top(v):
+    """-t N|all: how many of the estimate's best go through the converter."""
+    if v.lower() == "all":
+        return None
+    try:
+        n = int(v)
+    except ValueError:
+        n = 0
+    if n < 1:
+        raise argparse.ArgumentTypeError("%s: takes a number of dithers (1 or more) or all" % v)
+    return n
 
 
 def parse_weights(v):
@@ -518,6 +583,10 @@ def main():
     ap.add_argument("-w", "--weights", type=parse_weights, metavar="R,S,C",
                     help="without -d: weights for blurred RMS, SSIM and colour error when "
                          "picking the dither (default 0,1,1)")
+    ap.add_argument("-t", "--top", type=parse_top, default=-1, metavar="N",
+                    help="without -d: rank the dithers by a quick estimate of the converter "
+                         "first and convert only the best N (default %d; all: convert every "
+                         "one, slow)" % TOP)
     ap.add_argument("-c", "--chroma", type=parse_chroma, default=1.0, metavar="S",
                     help="match against the colours at S times their saturation (default "
                          "1; with -d hybrid, 0.6 suits many photos: warmer colours and fewer "
@@ -550,6 +619,10 @@ def main():
             a.line_runs = int(a.line_runs)
         else:
             ap.error("-l takes 0-8 or none")
+    if a.dither and a.top != -1:
+        ap.error("-t picks among dithers; not with -d")
+    if a.top == -1:
+        a.top = TOP
     else:
         a.line_runs = HYBRID_RUNS
     view = view_name = None
@@ -586,21 +659,41 @@ def main():
         # every candidate of every picture at once, so the pool stays busy
         cands = [c for c in dither_pick.CANDIDATES
                  if not (a.multicolor and c[1].startswith("hybrid"))]
+        # -t: estimate every dither first, the converter only for the best few
+        quick = not a.multicolor and a.top is not None and a.top < len(cands)
         tried = [[pool.submit(candidate, imgs[src], system, name, d, runs, a.border, a.size,
-                              a.chroma, view, a.multicolor) for name, d, runs in cands]
+                              a.chroma, view, a.multicolor, quick) for name, d, runs in cands]
                  for src, _, system in jobs]
     try:
+        if tried and quick:
+            for i, (src, dst, system) in enumerate(jobs):
+                print("%s%s: estimating %d dithers, converting the best %d" % (
+                    src, ", " + system.upper() if system else "", len(cands), a.top),
+                    flush=True)
+                ranked, outs = pick(tried[i], weights, os.path.basename(dst) + " estimate")
+                tried[i] = ([pool.submit(refine, imgs[src], outs[r["setting"]], r, system,
+                                         view) for r in ranked[:a.top]], ranked[a.top:])
         for i, (src, dst, system) in enumerate(jobs):
             note = ""
             if tried:
-                best, out, ranked = pick(tried[i], weights)
+                print("%s%s: %s %d dithers" % (
+                    src, ", " + system.upper() if system else "",
+                    "converting" if quick else "trying", a.top if quick else len(cands)),
+                    flush=True)
+                futs, extra = tried[i] if quick else (tried[i], ())
+                ranked, outs = pick(futs, weights, os.path.basename(dst), extra)
+                ranked = [r for r in ranked if not r.get("estimate")]
+                best, out = ranked[0], outs[ranked[0]["setting"]]
                 dither, runs = parse_dither(best["dither"]), best["runs"]
-                picked = ("picked by img2c64 from %d dithers (weights rms %g, ssim %g, "
-                          "color %g): %s" % ((len(ranked),) + tuple(weights) + (
+                picked = ("picked by img2c64 from %d dithers%s (weights rms %g, ssim %g, "
+                          "color %g): %s" % ((len(cands), " (the best %d by estimate "
+                                              "converted)" % a.top if quick else "")
+                                             + tuple(weights) + (
                               ", ".join("%s %.2f" % (r["setting"], r["score"])
                                         for r in ranked[:3]),)))
-                note = "; dither %s (next: %s)" % (best["setting"], ", ".join(
-                    "%s %.2f" % (r["setting"], r["score"]) for r in ranked[1:3]))
+                note = "; dither %s" % best["setting"] + (" (next: %s)" % ", ".join(
+                    "%s %.2f" % (r["setting"], r["score"]) for r in ranked[1:3])
+                    if len(ranked) > 1 else "")
             else:
                 dither, runs, picked = a.dither, a.line_runs, None
                 out = convert(imgs[src], system, dither, a.border, a.size, a.chroma, runs,

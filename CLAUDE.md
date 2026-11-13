@@ -36,7 +36,9 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   `make prg PIC=path [DITHER=mode] [CHROMA=S] [PALETTE=F.vpl] [SIZE=WxH] [LINES=N|none] [MC=1]`
   (`-m`, multicolour: PAL and NTSC of a 160x200 photo fit one PRG, ~37K).
 - `vic2/dither_pick.py`: the dither recommender's metrics (blurred RMS, SSIM of the
-  luma, a*b* colour error), `rank` and `CANDIDATES`; img2c64 without `-d` and
+  luma, a*b* colour error), `rank`, `CANDIDATES`, `shown` (through the converter) and
+  `estimate` (img2c64 `-t`: top-2 colours per cell, one exact cover per line as if every
+  span fitted, no timing; ~0.1 s against 10-370 s); img2c64 without `-d` and
   `analysis/dither_rank.py` use it. Imported only for that (numpy).
 - `vic2/disk.py`: `make pictures` (`python3 -m vic2.disk [--ntsc|--dual] [--viewer]
   [--disk K] [-o FILE] [FILE.v2i...]`): the build directory's `.v2i` files (not
@@ -101,7 +103,12 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   without `-d` it picks one per picture and system (`candidate`/`pick`, all candidates of
   all pictures in one process pool): `vic2/dither_pick.py`'s `CANDIDATES` through the
   converter, ranked by blurred SSIM and a*b* colour error (`-w R,S,C`, default `0,1,1`;
-  needs numpy), recorded as `dither choice` in the settings
+  needs numpy), recorded as `dither choice` in the settings; `-t N` (default 3, `all`)
+  ranks them all by `dither_pick.estimate` first and converts only the best N, then ranks
+  those with the others' estimates (`rank` scales each metric over the set it gets, so
+  ranking the N alone flipped a near tie; Nov 2026, kodim05/13 at 160x96: same picks as
+  `-t all`, a third of the CPU); the log prints every candidate's metrics, wrong
+  pixels and CPU time
   (`diffuse`: own serpentine error diffusion, pure Python; hybrid picks each cell's pair
   with `cell_pairs`, segment distance plus a spread penalty as in Yliluoma, and leaves the
   pair only beyond RGB distance E), `-c S` (colours are chosen against `palette(system,
