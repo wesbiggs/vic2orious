@@ -112,6 +112,13 @@ def palette_name(colours):
     return None
 
 
+def palette_of(colours):
+    """The first known palette holding all colours ((r, g, b)), else PEPTO (whose nearest
+    colours load_indexed maps them to)."""
+    colours = set(colours)
+    return next((pal for pal, _ in NAMES if colours <= set(pal)), PEPTO)
+
+
 def nearest(rgb, palette=PEPTO):
     r, g, b = rgb[:3]
     return min(range(len(palette)),

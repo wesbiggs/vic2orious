@@ -1,6 +1,8 @@
-; vic2orious viewer: loads a .v2i image from disk with the KERNAL and shows it.
-; If a text file named like the image (first 12 characters + ".TXT") exists, it is drawn
-; next to the image. Space returns to the file prompt; an empty file name exits to BASIC.
+; vic2orious viewer: loads a .v2i image from disk with the KERNAL and shows it. It tries
+; the name + ".v2i" first (the build's disk names; a typed ".v2i" is not doubled), then
+; the name as typed. If a text file named like the image (first 12 characters + ".TXT")
+; exists, it is drawn next to the image. Space returns to the file prompt; an empty file
+; name exits to BASIC.
 ; Assembled with DUAL=1 (a disk with PAL and NTSC images) it first tries the name +
 ; "-p.v2i" or "-n.v2i", whichever suits the machine, then the name as typed; with the
 ; first, the text is name + "-p.txt" / "-n.txt" if that exists, else as above.
@@ -56,6 +58,20 @@ prompt: lda #<msg_prompt
 @load:  lda #<msg_loading
         ldy #>msg_loading
         jsr print
+.if DUAL = 0
+        ldx namelen                     ; a typed ".V2I" is dropped (it is added below)
+        cpx #5
+        bcc @nosfx
+        ldy #3
+:       dex
+        lda name,x
+        cmp v2iext,y
+        bne @nosfx
+        dey
+        bpl :-
+        stx namelen
+@nosfx:
+.endif
 .if DUAL
         lda #0
         sta dualname
@@ -92,8 +108,34 @@ prompt: lda #<msg_prompt
         bcs @plain
         inc dualname
         bcc @check
-@plain:
+.else
+        lda namelen                     ; name + ".V2I", if that fits in 16
+        cmp #13
+        bcs @plain
+        tay
+:       dey
+        lda name,y
+        sta namebuf,y
+        tya
+        bne :-
+        ldy namelen
+        ldx #0
+:       lda v2iext,x
+        sta namebuf,y
+        iny
+        inx
+        cpx #4
+        bne :-
+        tya
+        ldx #<namebuf
+        ldy #>namebuf
+        jsr SETNAM
+        ldx #<LOADBUF
+        ldy #>LOADBUF
+        jsr loadfile
+        bcc @check
 .endif
+@plain:
         lda namelen
         ldx #<name
         ldy #>name
@@ -190,6 +232,9 @@ view:   jsr v2i_init
 @down:  lda $dc01
         and #$10
         bne @down
+@rel:   lda $dc01                       ; and released: still down after v2i_exit, the
+        and #$10                        ; KERNAL would put it in the key buffer
+        beq @rel
         jsr v2i_exit                     ; give the machine back to the KERNAL
 @flush: jsr GETIN                       ; drop the space from the key buffer
         bne @flush
@@ -237,6 +282,7 @@ print:  sta vptr                        ; print zero-terminated string at A/Y
 magic:  .byte "V2I"
 tmagic: .byte "V2T", 4
 txtext: .byte ".TXT"
+v2iext: .byte ".V2I"
 msg_prompt:
         .byte 13, "V2I VIEWER - FILE NAME (EMPTY = QUIT)", 13, "? ", 0
 msg_loading:
@@ -248,9 +294,9 @@ msg_notv2i:
 name:   .res 17
 .if DUAL
 suffix: .byte "-P.V2I", "-N.V2I"
-namebuf: .res 16
 dualname: .byte 0                       ; 1: the image was loaded as name + suffix
 .endif
+namebuf: .res 16
 
         .include "v2i.inc"
         .include "v2t.inc"

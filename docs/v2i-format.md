@@ -1,8 +1,9 @@
-# .v2i image format (versions 3 and 4)
+# .v2i image format (version 5)
 
-A `.v2i` file holds one converted image: a hires bitmap (version 3) or a multicolour
-bitmap (version 4), its cell colours, the sprite data, and a *kernel*. The kernel is 6502 code generated for this image that rewrites the sprite
-registers on every raster line, so the sprites paint the pixels the bitmap can't.
+A `.v2i` file holds one converted image: a hires or a multicolour bitmap, its cell
+colours, the sprite data, and a *kernel*. The kernel is 6502 code generated for this image that rewrites the sprite
+registers on every raster line, so the sprites paint the pixels the bitmap can't. A
+thumbnail and the metadata come first, so a program can read them without the rest.
 `vic2/build.py` writes it, and `asm/v2i.inc` displays it ([v2i-lib.md](v2i-lib.md)).
 
 On disk it is a PRG file with load address `$2000`. The contents don't depend on where
@@ -17,7 +18,7 @@ All words are little endian. Offsets are from the start of the data, after the P
 | offset | size | field |
 |---|---|---|
 | 0 | 3 | magic `"V2I"` |
-| 3 | 1 | format version: 3 hires, 4 multicolour (see [Multicolour](#multicolour-version-4)) |
+| 3 | 1 | format version: 5 |
 | 4 | 1 | width in cells (width / 8 screen pixels) |
 | 5 | 1 | height in cells (height / 8) |
 | 6 | 1 | character column of the image's left edge |
@@ -31,20 +32,56 @@ All words are little endian. Offsets are from the start of the data, after the P
 | 20 | 2 | number of image lines that are not pixel perfect (information only) |
 | 22 | 2 | number of image pixels that are not pixel perfect (information only) |
 | 24 | 1 | video system the kernel is made for: 0 PAL (6569/8565, 63 cycles x 312 lines), 1 NTSC (6567R8/8562, 65 cycles x 263 lines) |
-| 25 | 1 | flags: bit 0 set if metadata follows the image data; bit 1 multicolour (version 4 only); other bits 0 |
-| 26 | ... | kernel, then the bitmap, screen and sprite streams, back to back (multicolour: then the background and colour RAM stream), then the metadata if bit 0 of byte 25 is set |
+| 25 | 1 | flags: bit 0 metadata, bit 1 multicolour (see [Multicolour](#multicolour)), bit 2 thumbnail; other bits 0 |
+| 26 | ... | the [thumbnail](#thumbnail) if bit 2 is set, then the [metadata](#metadata) if bit 0 is set, then the kernel, the bitmap, screen and sprite streams, back to back (multicolour: then the background and colour RAM stream) |
 
-Version 2 kernels were entered on raster line 2 (same layout). Version 1 had no video
-system byte (always PAL) and a 24-byte header. Byte 25 was always 0 before metadata was
-added (Nov 2026); players don't read it or anything after the sprite stream, so files
-with and without metadata work with every version 3 player.
+The build always writes a thumbnail and metadata. The kernel starts after them: skip the
+thumbnail (4 + 64 * its sprite count bytes) and the metadata (2 + its length).
 
-## Multicolour (version 4)
+Older versions: 3 (hires) and 4 (multicolour, flags bit 1) had the same header, but the
+kernel right after it and the metadata (flags bit 0) at the end, after the sprite stream
+(and colour RAM stream); no thumbnails. Version 5 moved thumbnail and metadata to the
+front so they can be read alone, and has one version number for both modes; players
+(`v2i_show`) take version 5 only. Version 2 kernels were entered on raster line 2.
+Version 1 had no video system byte (always PAL) and a 24-byte header.
 
-A multicolour image (`tools/img2c64.py -m`, written as version 4 so version 3 players
-refuse it) is 160 wide pixels across at most, each two screen pixels wide, in cells of 4x8
-wide pixels; the header still counts 8-pixel cells. Byte 25 has bit 1 set, and after the
-sprite stream come:
+## Thumbnail
+
+The picture shrunk into one sprite's 24x21 pixels, in at most 8 colours over a background
+colour, made so that up to 8 hires sprites on top of each other, at the same position,
+one colour each, show it exactly: no raster tricks, any program can show it beside other
+things (`v2i_thumb` in [v2i-lib.md](v2i-lib.md)).
+
+| size | field |
+|---|---|
+| 1 | width in pixels (1-24) |
+| 1 | height in pixels (1-21) |
+| 1 | background colour: the colour of the pixels no sprite covers, and of the rest of the 24x21 area |
+| 1 | n, the number of sprites (0-8) |
+| 64 * n | for each sprite: its colour (1 byte), then its 63 bytes of sprite data (3 bytes a line, 21 lines, leftmost pixel in bit 7 of the first byte) |
+
+- **Size and place:** the picture as the C64 shows it (a multicolour image counts screen
+  pixels: 160 wide pixels are 320), fitted into 24x21 and never enlarged: 24x15 for the
+  full screen, 21x21 for a square one. It is centred in the 24x21 area (left and top
+  margin `(24 - width) / 2`, `(21 - height) / 2`, rounded down); the margins are
+  background.
+- **Pixels:** every pixel is the background colour or set in exactly one sprite, so the
+  order and priority of the sprites don't matter. Show them unexpanded and hires (or
+  expanded, both ways, for a 48x42 picture); the background is the host's to paint (or
+  to choose the screen behind it): the build writes black, the screen colour around the
+  images.
+- **Making it:** `tools/img2c64.py` makes it from the original picture (shrunk with box
+  averaging, saturation raised 1.5 times, then the 8 colours besides black chosen from
+  the palette it writes, by dropping the colour that adds the least error until 8 are
+  left; `vic2/thumb.py`) and stores it in the PNG (text chunk `vic2orious-thumb`, hex).
+  For a PNG without one (not from img2c64, or from one older than 0.1.0) the build
+  makes it the same way from the PNG itself.
+
+## Multicolour
+
+A multicolour image (`tools/img2c64.py -m`) is 160 wide pixels across at most, each two
+screen pixels wide, in cells of 4x8 wide pixels; the header still counts 8-pixel cells.
+Byte 25 has bit 1 set, and after the sprite stream come:
 
 | size | field |
 |---|---|
@@ -69,9 +106,14 @@ not record. A 2-byte length n (at most 1024), then n bytes of text: ASCII lines 
 form `key: value`, each ending in `$0a` (line feed, not PETSCII). Keys are lower case;
 readers should ignore keys they don't know. The build writes, in this order:
 
-- What `tools/img2c64.py` recorded in the PNG (a `tEXt` chunk with keyword
-  `vic2orious`, copied line by line), if the picture came from it: `quantiser`
-  (`img2c64`), `mode` (`multicolor`, only for `-m` pictures), `source` (the input picture's file name), `aspect` (`pal`, `ntsc` or
+- `quantized by`: the tool that made the PNG and its version, `img2c64@0.1.0` (from
+  img2c64's settings in the PNG; just `img2c64` for PNGs from before versions were
+  recorded, whose line was `quantiser`), or `unknown`.
+- `generated by`: the build that converted it, `vic2orious@0.1.0` (`vic2.VERSION`).
+- `date`: when it was converted, `YYYY-MM-DD HH:MM UTC` (a cached conversion keeps its
+  date).
+- The rest of what `tools/img2c64.py` recorded in the PNG (a `tEXt` chunk with keyword
+  `vic2orious`, copied line by line), if the picture came from it: `mode` (`multicolor`, only for `-m` pictures), `source` (the input picture's file name), `aspect` (`pal`, `ntsc` or
   `none`, with the pixel width), `fit` (the box, `WxH`; for `-m` also in wide pixels), `dither` (mode and parameter;
   for hybrid also its line runs, spread, clamp and pair candidates), `chroma` and
   `palette`.
@@ -84,7 +126,9 @@ readers should ignore keys they don't know. The build writes, in this order:
 For example:
 
 ```
-quantiser: img2c64
+quantized by: img2c64@0.1.0
+generated by: vic2orious@0.1.0
+date: 2026-11-12 14:03 UTC
 source: IMG_1639.png
 aspect: pal (pixel width 0.936)
 fit: 320x200
@@ -95,7 +139,8 @@ image: IMG_1639-p.png
 frame: no
 ```
 
-`python3 -m vic2.info FILE.v2i` prints the header and the metadata.
+`python3 -m vic2.info FILE.v2i` prints the header, the thumbnail's size and colours, and
+the metadata (`-t DIR` also writes the thumbnail as a PNG).
 
 ## Streams
 

@@ -69,7 +69,10 @@ the palette: the screen's of -P (default tools/tv.vpl), or with -P none Colodore
 shows it with its default colour controls (VICE's PAL rendering for -p and -a none files,
 its NTSC one for -n). Pictures are never enlarged beyond the stretch. The output is tagged sRGB
 and records the settings (source name, aspect, fit, dither, chroma, palette) in a PNG text
-chunk "vic2orious"; the build copies them into the .v2i's metadata.
+chunk "vic2orious"; the build copies them into the .v2i's metadata. It also holds a
+thumbnail (text chunk "vic2orious-thumb", hex): the picture shrunk into 24x21 pixels (as
+the C64 shows it: 24x15 for the full screen), in black and at most 8 other colours of the
+same palette, which 8 sprites show exactly (vic2/thumb.py); the build puts it in the .v2i.
 
 For a frame around the image on the C64, build with make FRAME=1 (v2i_frame draws it); -b
 makes sure the picture leaves room for it.
@@ -133,6 +136,7 @@ SYSTEMS = {"both": ["pal", "ntsc"], "pal": ["pal"], "ntsc": ["ntsc"], "none": [N
 MAX_W, MAX_H = 320, 200
 FRAME = 16                      # -b: a cell of frame on each side
 TEXT_KEY = "vic2orious"         # PNG text chunk with the settings (see settings)
+THUMB_KEY = "vic2orious-thumb"  # PNG text chunk with the thumbnail (vic2/thumb.py TEXT_KEY)
 MODE_MC = "multicolor"          # its "mode" line for -m (vic2/build.py reads it)
 # -P default: the screen colours are chosen for (measured from a photo of the author's TV)
 VIEW = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tv.vpl")
@@ -365,7 +369,9 @@ def settings(src, system, dither, frame=False, box=(MAX_W, MAX_H), chroma=1.0,
     mw, mh = box
     if frame:
         mw, mh = min(mw, MAX_W - FRAME), min(mh, MAX_H - FRAME)
-    lines = [("quantiser", "img2c64"),
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from vic2 import VERSION
+    lines = [("quantized by", "img2c64@" + VERSION),
              ("source", os.path.basename(src)),
              ("aspect", "%s (pixel width %g)" % (system, PAR[system]) if system else "none"),
              ("fit", "%dx%d%s" % (mw, mh, ", room for a frame" if frame else "")),
@@ -381,10 +387,22 @@ def settings(src, system, dither, frame=False, box=(MAX_W, MAX_H), chroma=1.0,
     return "".join("%s: %s\n" % kv for kv in lines)
 
 
-def save(out, dst, text):
-    """out as dst: tagged sRGB, with text (settings) in a tEXt chunk."""
+def thumbnail(img, out, system, view=None, mc=False):
+    """The thumbnail of picture img, converted to out (vic2/thumb.py: 24x21 at most, as the
+    screen shows out, in up to 9 of the colours out is written in)."""
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from vic2 import thumb
+    return thumb.make(img, (out.width * (2 if mc else 1), out.height),
+                      palette(system, 1.0, view))
+
+
+def save(out, dst, text, thumb=None):
+    """out as dst: tagged sRGB, with text (settings) in a tEXt chunk, and thumb (thumbnail
+    bytes) hex encoded in another."""
     info = PngImagePlugin.PngInfo()
     info.add_text(TEXT_KEY, text)
+    if thumb:
+        info.add_text(THUMB_KEY, thumb.hex())
     out.save(dst, icc_profile=SRGB_ICC, pnginfo=info)
 
 
@@ -588,7 +606,8 @@ def main():
                 out = convert(imgs[src], system, dither, a.border, a.size, a.chroma, runs,
                               view, a.multicolor)
             save(out, dst, settings(src, system, dither, a.border, a.size, a.chroma, runs,
-                                    picked, view_name, a.multicolor))
+                                    picked, view_name, a.multicolor),
+                 thumbnail(imgs[src], out, system, view, a.multicolor))
             print("%s -> %s (%dx%d%s%s)%s" % (src, dst, out.width, out.height,
                                             " wide pixels" if a.multicolor else "",
                                             ", " + system.upper() if system else "", note),

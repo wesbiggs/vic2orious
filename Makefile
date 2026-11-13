@@ -39,6 +39,9 @@ LINES   ?=                      # prg: N|none, hybrid's line budget (img2c64 -l;
                                 #   8, none to turn it off; needs DITHER=hybrid)
 MC      ?=                      # prg: 1, multicolour picture (img2c64 -m; not with
                                 #   DITHER=hybrid)
+VIEWER  ?=                      # pictures: 1, add the viewer and the stories
+FILES   ?=                      # pictures: the .v2i files (default: all in the build
+                                #   directory, both with DUAL=1)
 
 # build directories: SYS for the programs with images in them (build/pal/, build/ntsc/),
 # B for the disk with diskshow and viewer (build/dual/ with DUAL=1); VICE's video system
@@ -82,7 +85,8 @@ DRIVE    = $$(test -e $(B)/vic2orious.d81 && echo -drive8type 1581) \
            $(if $(strip $(FAST)),+drive8truedrive -trapdevice8)
 
 .PHONY: all build convert verify run run-slideshow run-diskshow run-viewer run-ask run-v2i \
-        run-v2t run-scroll run-stream run-d64 prg clean help FORCE
+        run-v2t run-scroll run-stream run-thumbs run-d64 pictures run-pictures prg clean \
+        help FORCE
 
 all: build
 
@@ -128,6 +132,23 @@ run-viewer: build
 	$(VICE) $(DRIVE) -8 $(DISKIMG) -autostart $(B)/viewer.prg \
 		$(if $(strip $(IMAGE)),-keybuf '$(strip $(IMAGE))\n')
 
+# a disk of .v2i files and the thumbnail browser (python3 -m vic2.disk):
+# build/<pal|ntsc|dual>/pictures.d64 or .d81
+PICOPTS := $(strip $(if $(strip $(DUAL)),--dual,$(if $(strip $(NTSC)),--ntsc)) \
+           $(if $(strip $(VIEWER)),--viewer) $(if $(strip $(DISK)),--disk $(strip $(DISK))) \
+           $(FILES))
+PICDISK  = $$(ls $(B)/pictures.d81 2>/dev/null || echo $(B)/pictures.d64)
+
+pictures: build
+	$(PYTHON) -m vic2.disk $(PICOPTS)
+
+run-pictures: pictures
+	$(VICE) $$(test -e $(B)/pictures.d81 && echo -drive8type 1581) \
+		$(if $(strip $(FAST)),+drive8truedrive -trapdevice8) -8 $(PICDISK) -autostart $(PICDISK)
+
+run-thumbs: build
+	$(VICE) $(DRIVE) -8 $(DISKIMG) -autostart $(B)/thumbs.prg
+
 run-ask: build
 	$(VICE) -autostartprgmode 1 $(SYS)/ask-$(strip $(ASK)).prg
 
@@ -167,6 +188,8 @@ help:
 	@echo "                    as many images as fit in one PRG)"
 	@echo "make run-diskshow   run the disk slideshow (loads every image from disk in turn)"
 	@echo "make run-viewer     run the disk viewer; IMAGE=princess types the name for you"
+	@echo "make run-thumbs     browse the disk's images by thumbnail and metadata (reads"
+	@echo "                    only the start of each file; return shows the image)"
 	@echo "make run-ask        run the ask demo (ASK=princess)"
 	@echo "make run-v2i        run the v2i-only demo (one image, space returns to BASIC)"
 	@echo "make run-v2t        run the v2t-only demo (text, KERNAL on, any key returns)"
@@ -175,6 +198,11 @@ help:
 	@echo "make run-stream     run the stream demo (the stories arrive as a byte stream, the"
 	@echo "                    C64 wraps and scrolls them; space returns)"
 	@echo "make run-d64        boot the disk (.d64, or .d81 when the images need it)"
+	@echo "make pictures       a disk of every .v2i in the build directory and the thumbnail"
+	@echo "                    browser: build/pal/pictures.d64 (.d81 if they need it;"
+	@echo "                    NTSC=1, DUAL=1: build/ntsc/, build/dual/); VIEWER=1 adds the"
+	@echo "                    viewer and the stories, FILES='a.v2i ...' picks the images"
+	@echo "make run-pictures   make it and boot it (the browser is the first file)"
 	@echo "make prg PIC=x.png  one picture -> x.prg here, for PAL and NTSC (img2c64,"
 	@echo "                    convert, dual v2i demo; python3 -m vic2.prg); DITHER=none|"
 	@echo "                    fs:K|atkinson[:K]|hybrid[:E], CHROMA=S (e.g. DITHER=hybrid"

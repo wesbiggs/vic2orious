@@ -46,6 +46,9 @@ start:  jsr v2i_init
 @down:  lda $dc01
         and #$10
         bne @down
+@rel:   lda $dc01                       ; and released (else BASIC gets a space)
+        and #$10
+        beq @rel
         jsr v2i_exit
         rts
 

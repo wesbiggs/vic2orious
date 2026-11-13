@@ -7,8 +7,14 @@
 ;                  IRQ/NMI vectors); saves the VIC and CIA2 bank registers for v2i_exit;
 ;                  detects PAL/NTSC (v2i_detect)
 ;   v2i_detect     v2i_system = V2I_PAL, V2I_NTSC or V2I_OTHER (also before v2i_init)
+;   v2i_info       A/Y = .v2i, or just its first part (header, thumbnail, metadata): check
+;                  it and set the image info, v2i_tptr and v2i_mptr/v2i_mlen (any time, no
+;                  v2i_init needed). C=1: A = V2I_ERR_FORMAT
+;   v2i_thumb      after v2i_info, A/Y = room for 8 sprite blocks (64-byte aligned, in the
+;                  VIC bank in use): show the thumbnail with sprites 0-7 at v2i_tx/v2i_ty
+;                  (any time, any bank and screen). C=1: none; else A = its background
 ;   v2i_show       A/Y = .v2i: unpack it into VIC bank 3 (stopped only). C=1: not shown,
-;                  A = V2I_ERR_FORMAT (not a version 3 or 4 .v2i) or V2I_ERR_SYSTEM (made for
+;                  A = V2I_ERR_FORMAT (not a version 5 .v2i) or V2I_ERR_SYSTEM (made for
 ;                  the other video system, or an unsupported VIC-II)
 ;   v2i_errmsg     A = error from v2i_show: A/Y = zero-terminated message (PETSCII)
 ;   v2i_frame      A = colour: frame around the image (needs the ring of cells around it;
@@ -38,8 +44,11 @@ V2I_H_SDST = 18
 V2I_H_SYS  = 24
 V2I_H_FLAGS = 25
 V2I_H_SIZE = 26
-V2I_F_MC   = 2                          ; flags: multicolour (version 4): background and
-                                        ; colour RAM stream follow the sprite stream
+V2I_VERSION = 5
+V2I_F_META = 1                          ; flags: metadata (2-byte length, ASCII text)
+V2I_F_MC   = 2                          ; flags: multicolour: background and colour RAM
+                                        ; stream follow the sprite stream
+V2I_F_THUMB = 4                         ; flags: thumbnail (first, right after the header)
 
 ; video systems (v2i_system, header byte V2I_H_SYS); kernels are made for one of them
 V2I_PAL    = 0                          ; 6569 (and 8565): 63 cycles x 312 lines
@@ -232,43 +241,21 @@ v2i_rts:
 v2i_badfmt:
         lda #V2I_ERR_FORMAT
         sec
+v2i_ret:
         rts
 v2i_badsys:
         lda #V2I_ERR_SYSTEM
         sec
         rts
 v2i_show:
-        sta v2i_hdr
-        sty v2i_hdr+1
-        ldy #2                          ; "V2I"
-:       lda (v2i_hdr),y
-        cmp v2i_magic,y
-        bne v2i_badfmt
-        dey
-        bpl :-
-        lda #0                          ; version 3: hires; 4: flags say which
-        sta v2i_mc
+        jsr v2i_info                    ; ptr = kernel
+        bcs v2i_ret
+        lda #0
         sta v2i_bg
-        ldy #3
-        lda (v2i_hdr),y
-        cmp #3
-        beq @ver
-        cmp #4
-        bne v2i_badfmt
-        ldy #V2I_H_FLAGS
-        lda (v2i_hdr),y
-        and #V2I_F_MC
-        sta v2i_mc
-@ver:   ldy #V2I_H_SYS                  ; made for this machine?
+        ldy #V2I_H_SYS                  ; made for this machine?
         lda (v2i_hdr),y
         cmp v2i_system
         bne v2i_badsys
-        ldy #4                          ; size and position
-:       lda (v2i_hdr),y
-        sta v2i_cols-4,y
-        iny
-        cpy #8
-        bne :-
         lda v2i_row                     ; first raster line below the image
         clc
         adc v2i_rows
@@ -292,14 +279,9 @@ v2i_show:
 :       sta $ff00,x
         dex
         bpl :-
-        clc                             ; ptr = start of kernel code
-        lda v2i_hdr
-        adc #V2I_H_SIZE
-        sta v2i_ptr
+        lda v2i_ptr                     ; the kernel, run where it is
         sta v2i_kvec
-        lda v2i_hdr+1
-        adc #0
-        sta v2i_ptr+1
+        lda v2i_ptr+1
         sta v2i_kvec+1
         ldy #V2I_H_KLEN
         jsr v2i_advance
@@ -351,6 +333,210 @@ v2i_show:
 @done:  clc
         rts
 
+; ---- A/Y = a .v2i, or as much of it as its header, thumbnail and metadata: check magic
+; and version, set the image info (v2i_cols .. v2i_mc), v2i_tptr (the thumbnail, 0 if
+; none), v2i_mptr and v2i_mlen (the metadata text and its length, 0 if none), and
+; v2i_ptr (the kernel). C=1: not a version 5 .v2i, A = V2I_ERR_FORMAT
+v2i_ibad:
+        jmp v2i_badfmt
+v2i_info:
+        sta v2i_hdr
+        sty v2i_hdr+1
+        ldy #2                          ; "V2I"
+:       lda (v2i_hdr),y
+        cmp v2i_magic,y
+        bne v2i_ibad
+        dey
+        bpl :-
+        ldy #3
+        lda (v2i_hdr),y
+        cmp #V2I_VERSION
+        bne v2i_ibad
+        ldy #V2I_H_FLAGS
+        lda (v2i_hdr),y
+        sta v2i_flags
+        and #V2I_F_MC
+        sta v2i_mc
+        ldy #4                          ; size and position
+:       lda (v2i_hdr),y
+        sta v2i_cols-4,y
+        iny
+        cpy #8
+        bne :-
+        ldx #5                          ; no thumbnail, no metadata
+        lda #0
+:       sta v2i_tptr,x
+        dex
+        bpl :-
+        clc                             ; ptr = what follows the header
+        lda v2i_hdr
+        adc #V2I_H_SIZE
+        sta v2i_ptr
+        lda v2i_hdr+1
+        adc #0
+        sta v2i_ptr+1
+        lda v2i_flags
+        and #V2I_F_THUMB
+        beq @meta
+        lda v2i_ptr                     ; thumbnail: 4 bytes, then 64 per sprite
+        sta v2i_tptr
+        lda v2i_ptr+1
+        sta v2i_tptr+1
+        ldy #3
+        lda (v2i_ptr),y
+        tax
+        lda #4
+        jsr v2i_skip
+:       dex
+        bmi @meta
+        lda #64
+        jsr v2i_skip
+        jmp :-
+@meta:  lda v2i_flags
+        and #V2I_F_META
+        beq @done
+        ldy #0                          ; metadata: length, text
+        lda (v2i_ptr),y
+        sta v2i_mlen
+        iny
+        lda (v2i_ptr),y
+        sta v2i_mlen+1
+        lda #2
+        jsr v2i_skip
+        lda v2i_ptr
+        sta v2i_mptr
+        lda v2i_ptr+1
+        sta v2i_mptr+1
+        clc
+        lda v2i_ptr
+        adc v2i_mlen
+        sta v2i_ptr
+        lda v2i_ptr+1
+        adc v2i_mlen+1
+        sta v2i_ptr+1
+@done:  clc
+        rts
+
+v2i_skip:                               ; ptr += A
+        clc
+        adc v2i_ptr
+        sta v2i_ptr
+        bcc :+
+        inc v2i_ptr+1
+:       rts
+
+; ---- the thumbnail of the .v2i v2i_info looked at, on sprites 0..n-1 (n = v2i_tn, up to
+; 8) at X = v2i_tx (9 bits), Y = v2i_ty: their data copied to A/Y (n blocks of 64 bytes,
+; 64-byte aligned, inside the VIC bank in use), pointers set in the screen in use ($dd00,
+; $d018), colours, positions, unexpanded hires sprites in front of the picture, $d015 =
+; sprites 0..n-1 (the others off). Any time, KERNAL on or off. C=1: no thumbnail; else
+; A = its background colour (the pixels no sprite covers: the host's to paint)
+v2i_thumb:
+        sta v2i_dst
+        sty v2i_dst+1
+        lda v2i_tptr+1
+        bne :+
+        sec
+        rts
+:       sta v2i_src+1
+        lda v2i_tptr
+        sta v2i_src
+        lda $dd00                       ; scr = VIC bank + ($d018 >> 4) * $400 + $3f8
+        and #3
+        eor #3
+        lsr
+        ror
+        ror                             ; (bank << 6: the base's high byte)
+        sta v2i_scr+1
+        lda $d018
+        lsr
+        lsr
+        and #$3c
+        ora v2i_scr+1
+        ora #>$03f8
+        sta v2i_scr+1
+        lda #<$03f8
+        sta v2i_scr
+        lda v2i_dst+1                   ; first block = (dst & $3fff) >> 6
+        and #$3f
+        sta v2i_tblk
+        lda v2i_dst
+        asl
+        rol v2i_tblk
+        asl
+        rol v2i_tblk
+        ldy #2
+        lda (v2i_src),y
+        sta v2i_tbg
+        iny
+        lda (v2i_src),y
+        sta v2i_tn
+        lda #4                          ; src = first sprite: colour, 63 bytes
+        clc
+        adc v2i_src
+        sta v2i_src
+        bcc :+
+        inc v2i_src+1
+:       lda #0
+        ldx v2i_tx+1                    ; X >= 256: all of them
+        beq :+
+        lda #$ff
+:       sta $d010
+        lda #0
+        sta $d017
+        sta $d01b
+        sta $d01c
+        sta $d01d
+        ldx #0
+@spr:   cpx v2i_tn
+        beq @on
+        txa
+        asl
+        tay
+        lda v2i_tx
+        sta $d000,y
+        lda v2i_ty
+        sta $d001,y
+        txa                             ; pointer
+        tay
+        clc
+        adc v2i_tblk
+        sta (v2i_scr),y
+        ldy #0
+        lda (v2i_src),y
+        sta $d027,x
+:       iny                             ; (src),1..63 -> (dst),0..62
+        lda (v2i_src),y
+        dey
+        sta (v2i_dst),y
+        iny
+        cpy #63
+        bne :-
+        lda #64
+        clc
+        adc v2i_src
+        sta v2i_src
+        bcc :+
+        inc v2i_src+1
+:       lda #64
+        clc
+        adc v2i_dst
+        sta v2i_dst
+        bcc :+
+        inc v2i_dst+1
+:       inx
+        bne @spr
+@on:    lda #0                          ; $d015 = 2^n - 1
+:       dex
+        bmi :+
+        sec
+        rol
+        bne :-                          ; (always: a 1 was rotated in)
+:       sta $d015
+        lda v2i_tbg
+        clc
+        rts
+
 ; ---- A = error from v2i_show: A/Y = a message for it (zero-terminated PETSCII)
 v2i_errmsg:
         ldx #0
@@ -367,7 +553,7 @@ v2i_errmsg:
         ldy v2i_msgs+1,x
         rts
 v2i_msgs:  .word v2i_msg_fmt, v2i_msg_ntsc, v2i_msg_pal, v2i_msg_vic
-v2i_msg_fmt:  .byte "NOT A V2I FILE (VERSION 3 OR 4)", 0
+v2i_msg_fmt:  .byte "NOT A V2I FILE (VERSION 5)", 0
 v2i_msg_ntsc: .byte "THIS IMAGE IS FOR AN NTSC C64", 0
 v2i_msg_pal:  .byte "THIS IMAGE IS FOR A PAL C64", 0
 v2i_msg_vic:  .byte "UNSUPPORTED VIC-II (PAL 6569/8565 OR NTSC 6567R8/8562 ONLY)", 0
@@ -607,6 +793,17 @@ v2i_mc:    .byte 0                      ; V2I_F_MC for a multicolour image, else
 v2i_bg:    .byte 0                      ; background colour ($d021, v2i_start)
 v2i_end:   .byte 0                      ; first raster line below the image (the kernel
                                         ; returns and v2i_hook runs about then)
+; set by v2i_info (with the image info above)
+v2i_tptr:  .word 0                      ; thumbnail, 0 if none
+v2i_mptr:  .word 0                      ; metadata text ("key: value" lines, ASCII, each
+v2i_mlen:  .word 0                      ; ending in $0a), and its length; 0 if none
+v2i_flags: .byte 0                      ; header flags (V2I_F_*)
+; thumbnail position for v2i_thumb (sprite coordinates), and what it found
+v2i_tx:    .word 24                     ; X (0-511)
+v2i_ty:    .byte 50                     ; Y
+v2i_tn:    .byte 0                      ; sprites the thumbnail uses (0-8)
+v2i_tbg:   .byte 0                      ; its background colour
+v2i_tblk:  .byte 0                      ; (internal: first sprite block)
 
 ; internal
 v2i_save01: .byte 0

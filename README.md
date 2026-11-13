@@ -238,7 +238,14 @@ reuses a cached conversion (`--force` converts again). Outputs, in `build/pal/` 
 - `stream-demo.prg`: the same stories arriving as a stream of plain ASCII text (3 bytes
   a frame), which the C64 wraps itself, word by word, into a ring of lines, scrolling
   smoothly as the newest line reaches the bottom. Space returns to BASIC.
-- `vic2orious.d64`: disk with `viewer`, `diskshow`, `slideshow`, the demos, and every
+- `thumbs.prg` (`thumbnails` on the disk): browses the images on whatever disk is in
+  the drive by thumbnail: it reads the directory and takes every file ending in `.v2i`
+  (the build names them so, e.g. `castle.v2i`). It
+  reads only the start of each `.v2i` (header, thumbnail and metadata come first) and
+  shows the thumbnail (8 sprites at most, no raster tricks) beside its size, mode, video
+  system and metadata. Space or cursor keys browse, return shows the whole image, D reads
+  the directory again (after changing disks), RUN/STOP returns to BASIC.
+- `vic2orious.d64`: disk with `viewer`, `diskshow`, `thumbnails`, `slideshow`, the demos, and every
   image and story as separate files. When they do not fit on a 1541 disk (about 13
   images) it is `vic2orious.d81` (1581, about 60 images) instead.
 
@@ -249,6 +256,7 @@ make run                              # the slideshow
 make run-diskshow                     # the disk slideshow (all images)
 make run-diskshow FAST=1              # same, with instant loading (also run-viewer, run-d64)
 make run-viewer IMAGE=princess        # the disk viewer, with the image name typed in
+make run-thumbs                       # browse the disk's images by thumbnail
 make run-ask ASK=princess             # the ask demo
 make run-v2i                          # image only
 make run-v2t                          # text only
@@ -257,7 +265,22 @@ make run-stream                       # streamed text, wrapped and scrolled on t
 make run-d64                          # boot the disk (.d64 or .d81; starts the viewer)
 ```
 
-In the viewer, type an image name. Space returns to the prompt; an empty name quits. In
+To put `.v2i` files on a disk of their own, with the thumbnail browser as its first
+file (so `LOAD"*",8` and `RUN` start it):
+
+```bash
+make pictures                         # every .v2i in build/pal/ -> build/pal/pictures.d64
+make pictures NTSC=1 VIEWER=1         # build/ntsc/, with the viewer and the stories
+make pictures DUAL=1                  # PAL and NTSC images on one disk, in build/dual/
+make pictures FILES='a.v2i b.v2i'     # just these (DISK=d81 forces a .d81)
+make run-pictures                     # make it and boot it in VICE
+```
+
+It takes the files the build made (names as on the build's own disks, `name.v2i`,
+first 12 characters), leaves out older `.v2i` versions and the other system's files, and
+makes a `.d81` when the images don't fit a `.d64`. It is `python3 -m vic2.disk`.
+
+In the viewer, type an image name (`princess` or `princess.v2i`). Space returns to the prompt; an empty name quits. In
 the ask demo, the number keys pick topics and space returns to BASIC.
 
 ## Using the images in your own program

@@ -4,7 +4,8 @@ Converts C64-palette PNGs into C64 hires bitmap + per-line multiplexed hires spr
 multicolour bitmap with X-expanded sprites), aiming for pixel-perfect output, and plays the results on a real (emulated) C64: a slideshow PRG
 with the images embedded, a disk slideshow (`diskshow`) that loads every image in turn, a
 viewer PRG that loads `.v2i` image files (plus optional `.txt` narrative files drawn
-beside the picture) from disk by name, an interactive `ask` demo, and two smooth
+beside the picture) from disk by name, a thumbnail browser (`thumbs`: reads only the
+start of each `.v2i`, where thumbnail and metadata are), an interactive `ask` demo, and two smooth
 scrolling text demos (a prepared page; a stream the C64 wraps itself).
 The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.inc`
 (text), that other programs can include. Apache-2.0 licensed (`LICENSE`).
@@ -37,8 +38,21 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 - `vic2/dither_pick.py`: the dither recommender's metrics (blurred RMS, SSIM of the
   luma, a*b* colour error), `rank` and `CANDIDATES`; img2c64 without `-d` and
   `analysis/dither_rank.py` use it. Imported only for that (numpy).
-- `vic2/info.py`: `python3 -m vic2.info FILE.v2i...` prints a `.v2i`'s header and
-  metadata (`build.read_v2i`).
+- `vic2/disk.py`: `make pictures` (`python3 -m vic2.disk [--ntsc|--dual] [--viewer]
+  [--disk K] [-o FILE] [FILE.v2i...]`): the build directory's `.v2i` files (not
+  `*-centred`, not older versions or the other system's) with `thumbs.prg` (and
+  `viewer.prg` and the `.txt.prg` stories) onto `build/<pal|ntsc|dual>/pictures.d64`/`.d81`,
+  named as `build.py` names them (`v2i_disk_name`; dual: `dual_base` + `-P`/`-N`, texts
+  shared when the same). Needs a build first for the programs.
+- `vic2/info.py`: `python3 -m vic2.info [-t DIR] FILE.v2i...` prints a `.v2i`'s header,
+  thumbnail and metadata (`build.read_v2i`; `-t` writes the thumbnails as PNGs).
+- `vic2/thumb.py`: thumbnails (Nov 2026): the picture as the C64 shows it, box-shrunk into
+  24x21 (24x15 for 320x200), saturation x1.5 (`SATURATE`; averaging greys colours),
+  black plus at most 8 colours (`choose`: backward elimination from 16 by error), one
+  sprite per colour, all at one position, so 8 overlaid sprites show it exactly. img2c64
+  makes it from the source picture (`thumbnail`, PNG `tEXt` `vic2orious-thumb`, hex);
+  `build.v2i_thumbnail` takes that, else makes one from the PNG, and writes `build/<system>/<name>_thumb.png`. Tried: F-S
+  dither (noise at this size), Lanczos (no better than box).
 - `vic2/layers.py`: `build/<system>/<name>_sprites.png`, written with `_compare.png` on
   every new conversion (not from the cache: `--force` for old ones): bitmap alone, sprite
   pixels alone, each sprite's windows by number, sprite pixels per cell as a heat map
@@ -62,7 +76,15 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   single lines, measure, clear; bitmap/screen addresses configurable, no VIC setup).
   Each stands alone (own zero page block, own row address helper, prefixed names).
   `asm/slideshow.s`, `asm/diskshow.s`, `asm/viewer.s` and `asm/ask.s` use both;
-  `asm/v2i-demo.s`,
+  `asm/thumbs.s` (KERNAL on, BASIC banked out, text screen) reads the directory (`scan`, again on D for another disk:
+  `$` as BASIC lists it) into a name table at `$a000` (17 bytes a name, up to 240):
+  every name ending `.V2I` except the other system's `-N.V2I`/`-P.V2I`, so one program
+  serves single and dual disks (no DUAL build). For the image shown it
+  reads header, thumbnail and metadata through a data channel (`preview`, OPEN/CHRIN,
+  about 600 bytes), shows them with `v2i_info`/`v2i_thumb` (sprite blocks at `$3e00`)
+  and its own screen writer (`putc`, ASCII to screen codes, no KERNAL editor: no
+  scrolling or line linking), and loads the whole file to `$2800` for `v2i_show` on
+  return. It saves BASIC's zero page that `v2i_info` uses (`V2I_ZP`). `asm/v2i-demo.s`,
   `asm/v2t-demo.s` (KERNAL on, bitmap in bank 1), `asm/scroll.s` and `asm/stream.s` use
   one.
 - `docs/`: `v2i-format.md`, `v2t-format.md` (incl. the font), `v2i-lib.md`, `v2t-lib.md`.
@@ -103,7 +125,8 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   fit, dither with hybrid's constants, chroma, palette) in a `tEXt` chunk `vic2orious`
   (`TEXT_KEY`), which the build copies into the `.v2i` metadata. Refuses to overwrite its input. `-b` only leaves
   room for the frame `v2i_frame` draws (`build -b`): fits 304x184. (Its old `-b` drew the
-  frame into the pixels, which did not always convert exactly.)
+  frame into the pixels, which did not always convert exactly.) Every output PNG also
+  gets a thumbnail (`vic2/thumb.py`, text chunk `vic2orious-thumb`).
 - `analysis/`: one-off measurements, not part of the build (`compare.py`: v2i vs AFLI and
   NUFLI; `spantypes.py`: X-expanded/multicolour spans; `timingloss.py`: wrong pixels by
   cause; `badline_weight.py`: the `RETASK` badline weight; `dither_score.py`: img2c64
@@ -137,8 +160,8 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   image pixels: X-expanded hires sprites (`$d01d` = `$ff`, `$d016` = `$18` in the
   prologue) paint 24 wide pixel single colour spans, and their pixel timing matched VICE
   first time (0 differing pixels). Background black (`bg=0`): `00` shows `$d021` on the
-  whole screen, also around the image. `.v2i` version 4 (flags bit 1, `V2I_MC`):
-  background, colour RAM stream after the sprites; hires files stay version 3. The
+  whole screen, also around the image. `.v2i` flags bit 1 (`V2I_MC`; was version 4,
+  now all files are version 5): background, colour RAM stream after the sprites. The
   build centres them and leaves out text, `.ask` and frame (they would be drawn in
   multicolour); `expected` and `_expected.png` are in screen pixels (doubled).
   `v2i_show` clears and fills colour RAM, `v2i_start` writes `v2i_bg` to `$d021`,
@@ -234,7 +257,7 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   PAL and NTSC `.v2i` both embedded (`demo_img`, `demo_img_n`), picked by `v2i_system`
   after `v2i_init`; it replaces the `v2i demo-p`/`-n` pair on the dual disk. `--verify`
   with `--dual` also boots the dual diskshow, the dual viewer (typing the first image's
-  `dual_base`) and the dual v2i demo on both systems.
+  `dual_base`), the dual v2i demo and the dual thumbnail browser on both systems.
   diskshow's hold time is `HOLD_SECS`, multiplied by 50 or 60 at startup.
 - Buffers: diskshow and the viewer load images at `$2800` (`PLAYER_BUF`; build asserts a
   `.v2i` fits below `$9800`) and texts at `$9800`. The programs may use up to `$27ff`:
@@ -296,13 +319,13 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 - Build everything from `input/`: `make` (or `python3 -m vic2.build`; add `--verify` to
   compare each screen with VICE, `--run` to launch the slideshow; specific files can be
   passed as arguments). The Makefile wraps it: `make verify`,
-  `make run[-diskshow|-viewer|-ask|-d64]`, options `IMAGES FRAME AT LEADING AUTO HOLD
-  DISK NTSC DUAL FAST IMAGE ASK FONT` (`make help`). macOS make is 3.81, so the Makefile uses a
+  `make run[-diskshow|-viewer|-thumbs|-ask|-d64|-pictures]`, `make pictures`, options `IMAGES FRAME AT LEADING AUTO HOLD
+  DISK NTSC DUAL FAST IMAGE ASK FONT VIEWER FILES` (`make help`). macOS make is 3.81, so the Makefile uses a
   stamp file (`build/<system>/.built`, plus `.opts`/`.copts` there for the options) instead
   of grouped targets.
 - Conversion cache: `build/pal/<name>.json` (`build/ntsc/` for NTSC) holds the converter result (stats, geometry, path
   of `_expected.png`) and a key hashing the png, frame/at, the video system,
-  `CACHE_VERSION` and `CACHE_SOURCES` (convert, timing, palette). Builds reuse it;
+  `CACHE_VERSION` and `CACHE_SOURCES` (convert, timing, palette, thumb, `__init__` for the version). Builds reuse it;
   `--force` reconverts. build.py itself is not hashed: bump `CACHE_VERSION` when changing
   how `.v2i` is packed. Texts are not cached: `convert_image` packs the `.txt` again on
   every run (milliseconds), so editing a story, `--font` or `--leading` never reconverts
@@ -312,16 +335,23 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 - After touching `timing.py`, `convert.py`, `v2i.inc` or `v2t.inc`, run `--verify`: every check
   must report `0 differing pixels` (VICE output vs the model). The converter itself reports
   bad lines / wrong pixels vs the source; those are expected to be non-zero.
-- `.v2i` metadata (header byte 25 bit 0, `V2I_META`; text block after the sprite stream,
-  `v2i_metadata`): img2c64's PNG `tEXt` lines plus the build's `image`, `palette` (if
-  img2c64 named none; `palette_name`), `frame`. Players ignore it, so the version stayed
-  3. It is written at conversion, so it is cached with the `.v2i` (the key hashes the
-  PNG, which holds img2c64's text). Settings not in the format go there.
+- `.v2i` version 5 (Nov 2026): header, thumbnail (flags bit 2, `V2I_THUMB`), metadata
+  (bit 0, `V2I_META`, `v2i_metadata`), then kernel and streams, so a program can read
+  thumbnail and metadata alone. Versions 3/4 had the metadata at the end and no
+  thumbnail; `v2i_show` (through `v2i_info`) takes only version 5, `read_v2i` all.
+  Metadata: `quantized by` (img2c64's line, `img2c64@VERSION`; old PNGs' `quantiser`
+  is renamed; else `unknown`), `generated by: vic2orious@VERSION` (`vic2/__init__.py`
+  `VERSION`, img2c64 imports it too), `date` (UTC, at conversion), img2c64's other PNG
+  `tEXt` lines, then the build's `image`, `palette` (if img2c64 named none;
+  `palette_name`), `frame`. Both are written at conversion, so
+  they are cached with the `.v2i` (the key hashes the PNG, which holds img2c64's text and
+  thumbnail, and `thumb.py`). Settings not in the format go there.
 - `--verify` builds one single-image slideshow per image, with its text, and compares the
   whole screen with a model (`expected_screen`: converter output + `Screen` text model).
   For each `.ask` it builds `ask.s` with `AUTO=n` (picks the last topic, then keeps
   drawing a black-on-black line) and compares with `Ask.model`; the v2i demo against the
-  first image and the v2t demo against `v2t_demo_screen`; the scroll demo scrolls itself
+  first image, the thumbnail browser (`VERIFY=1`: text in black, booted with the disk)
+  against `thumbs_screen`, and the v2t demo against `v2t_demo_screen`; the scroll demo scrolls itself
   (`AUTO=1`: down, then back up; `AUTO=2`: the timing check) and is compared with
   `scroll_screen`, as is the stream demo's last screen (all at once, 4 times over, so both
   rings wrap; and at `STREAM_RATE`; built `STALLS=1`). If text rendering
@@ -349,8 +379,11 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   VICE needs `-drive8type 1581`, which the Makefile adds). VIC bank 3 (`$c000-$ffff`) holds the image on screen and is not available.
   The viewer and diskshow must end below `$2800` (asserted): images load there.
   (The viewer once loaded text at `$1000` and overwrote the end of its own font.)
-- Disk names: images keep their name (cut to 16 chars, `-c64` dropped); text files are the
-  first 12 chars + `.txt`.
+- Disk names: images are the first 12 chars of their name (`-c64` dropped) + `.v2i`
+  (`v2i_disk_name`; Nov 2026, so the thumbnail browser can find them in the directory;
+  the dual disk's are `dual_base` + `-p.v2i`/`-n.v2i`); the viewer tries the typed name +
+  `.v2i` first (a typed `.v2i` is dropped first), then the name as typed. Text files are
+  the first 12 chars + `.txt`.
 
 ## What has been tried
 
