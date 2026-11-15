@@ -458,28 +458,50 @@ def write_diskshow_inc(infos, hold_secs, dual_texts=None):
 
 def text_layout(text, font, px, height, leading=0):
     """Word-wrap paragraphs (blank-line separated) to px pixels. A paragraph starting with
-    "# " is a title. Lines are font height + leading pixels apart in a height pixel area. Returns
-    [(colour, line)] and the number of lines that did not fit."""
+    "# " is a title. Inside a paragraph a line feed is a space; spaces at its start (an
+    indent) and runs of spaces inside it are kept (tabs stop every 4 columns). One blank line
+    between paragraphs gives one empty line, each further blank line another. Lines are
+    font height + leading pixels apart in a height pixel area. Returns [(colour, line)]
+    and the number of lines that did not fit."""
+    paras, cur, blanks = [], [], 0          # [(empty lines before it, its source lines)]
+    for line in text.expandtabs(4).replace("\r", "").split("\n"):
+        if line.strip(" "):
+            if not cur:
+                paras.append((blanks if paras else 0, cur))
+            cur.append(line.rstrip(" "))
+            blanks = 0
+        else:
+            if cur:
+                cur = []
+            blanks += 1
     rows = []
-    for i, para in enumerate(p for p in text.strip().split("\n\n") if p.strip()):
+    for gap, lines in paras:
         col = TEXT_BODY
-        para = " ".join(para.split())
+        para = " ".join([lines[0]] + [l.lstrip(" ") for l in lines[1:]])
         if para.startswith("# "):
             col, para = TEXT_TITLE, para[2:]
-        if i:
-            rows.append((TEXT_BODY, ""))
+        rows += [(TEXT_BODY, "")] * gap
         rows += [(col, l) for l in font.wrap(para, px)]
     fit = (height + leading) // (font.height + leading)
     return rows[:fit], max(0, len(rows) - fit)
 
 
-def text_area(g, min_width=8):
+def text_area(g, min_width=8, line_px=None):
     """(column, row, width, height) in cells of the free area beside the image (one cell
-    margin): right of it, else left, else below, else above. None if nothing fits."""
+    margin): right of it, else left, else below, else above. Below or above, the margin
+    row is left out when the area with it is lower than line_px pixels (one line: the
+    current font's height). None if nothing fits."""
+    if line_px is None:
+        line_px = fonts.current().height
     x0, x1 = g.col0 - g.frame, g.col0 + g.cols + g.frame      # occupied columns x0..x1-1
     y0, y1 = g.row0 - g.frame, g.row0 + g.rows + g.frame
+
+    def rows(free):                       # free rows below or above: (margin, height)
+        return (1, free - 1) if (free - 1) * 8 >= line_px else (0, free)
+    mb, hb = rows(25 - y1)
+    ha = rows(y0)[1]
     for col0, row0, width, height in ((x1 + 1, 0, 40 - x1 - 1, 25), (0, 0, x0 - 1, 25),
-                                      (0, y1 + 1, 40, 25 - y1 - 1), (0, 0, 40, y0 - 1)):
+                                      (0, y1 + mb, 40, hb), (0, 0, 40, ha)):
         if width >= min_width and height > 0:
             return col0, row0, width, height
     return None

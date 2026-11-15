@@ -15,6 +15,8 @@ Turn any picture into a C64 hires or multicolour bitmap with multiplexed sprites
 - **Disk slideshow:** `diskshow` loads each image and its text from a .d64 or .d81, showing a floppy icon while it loads (10 s default hold).
 - **Metadata block:** .v2i files carry the conversion settings; `python3 -m vic2.info` prints them.
 - **Thumbnails:** img2c64 stores a 24x21 thumbnail in each PNG (at most 8 colours over black, shown exactly by up to 8 overlaid sprites) and the build puts it in the .v2i, making one from the PNG if img2c64 did not. `v2i_info` and `v2i_thumb` read and show it with the KERNAL on; the `thumbnails` program (`make run-thumbs`) browses the `.v2i` files in any disk's directory by thumbnail and metadata, reading only the start of each file (D reads the directory again after a disk change). Images are written to disk as `name.v2i`; the viewer accepts the name with or without `.v2i`. `make pictures` (`python3 -m vic2.disk`) puts the built `.v2i` files on a disk of their own with the browser (`VIEWER=1`: and the viewer and stories; `NTSC=1`, `DUAL=1`).
+- **Whitespace in stories:** extra blank lines, indents and runs of spaces in `.txt`/`.ask` text are kept; a no-break space joins words.
+- **Text under wide images:** the empty row between image and text is left out when it would leave no room for one line of the font (a 320x184 image now takes NLQ 10-14 in its last two rows).
 - **GEOS fonts** for v2t (`make FONT=...`; bring your own, none are included).
 - **Demos:** smooth scroll (`make run-scroll`) and a stream demo with C64-side word wrap (`make run-stream`).
 - **Build:** per-image conversion cache with `make -j`, `FAST=1` for instant disk loading in VICE, and a `_sprites.png` view of sprite use for each conversion.

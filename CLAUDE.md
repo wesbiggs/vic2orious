@@ -177,7 +177,8 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 
 - An image with text (`name.txt` or `name.ask`, `has_text`) sits at the upper left by
   default (char row 0, column 0, so image line 0 is raster $33 and sprite X = 24 +
-  column); one without is centred (`place`: column (40 - cols) // 2, row (25 - rows) // 2).
+  column; the text goes right of it, else left, below, above: `text_area`, one cell
+  margin, dropped below/above when it leaves no room for one line of the font); one without is centred (`place`: column (40 - cols) // 2, row (25 - rows) // 2).
   The v2i demo shows no text, so it gets a centred second conversion of its image
   (`demo_image`, `build/<system>/<name>-centred.*`) when the image has text.
   `build --at C,R` places all of them (`Geometry`), the demo's too. The
@@ -278,8 +279,9 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   (up to `FIT_TRIES` schedules) for the set of dropped spans losing the fewest pixels.
   `recover` then lets sprites paint leftover pixels they already reach without writes.
   Remaining pixels fall back to the nearer of the cell's two colours.
-- Text: the build word-wraps by pixel width and ships finished lines (ASCII codes); the
-  C64 only draws glyphs and colours each row's cells. The C64 does not wrap. The font
+- Text: the build word-wraps by pixel width and ships finished lines (ASCII codes; indents,
+  runs of spaces and extra blank lines are kept, U+00A0 joins words: `text_layout`,
+  `Font.wrap`, Nov 2026); the C64 only draws glyphs and colours each row's cells. The C64 does not wrap. The font
   (a GEOS record, or the ROM's) is assembled into the program as byte columns
   (`font.inc`, `Font.asm`): `v2t_tglyphs` draws a glyph one 8-pixel column at a time,
   top to bottom, Y = pixel line in the char row for both font (src = column - tyo) and

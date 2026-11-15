@@ -44,7 +44,11 @@ ASCII 32-127, as GEOS fonts have them. Codes 128-255 are drawn as code & 127, co
   glyph after it. Glyph rows below character row 24 are not drawn.
 - **Text file input:** paragraphs are separated by blank lines. A paragraph starting with
   `# ` is a title, white (`$10`). Body text is light grey on black (`$f0`). Paragraphs
-  are separated by an empty line.
+  are separated by an empty line; each further blank line in the file adds another.
+  Inside a paragraph a line feed is a space, spaces at its start (an indent) and runs of
+  spaces are kept, and a tab moves to the next multiple of 4 columns. A line breaks only
+  at spaces, which are dropped there; a no-break space (U+00A0) is drawn as a space but
+  never breaks.
 
 ## The font
 

@@ -7,6 +7,7 @@ the font for the whole process (like timing.set_standard); `current` returns it.
 """
 
 import os
+import re
 
 # VICE's C64 data directory (character ROM, palettes): $VICE_DATA, else the first of these
 # that exists (Homebrew on Apple silicon and Intel, then the usual Linux prefixes)
@@ -100,11 +101,18 @@ class Font:
         return sum(self.glyph(c)[1] for c in codes(text))
 
     def wrap(self, para, px):
-        """Greedy word wrap of one paragraph to px pixels."""
-        lines, cur = [], ""
-        for word in para.split():
-            cand = word if not cur else cur + " " + word
-            if self.width(cand) - self.hang <= px or not cur:
+        """Greedy word wrap of one paragraph to px pixels. Words are separated by runs of
+        spaces (" " only: a no-break space, U+00A0, joins), which are kept as they are
+        inside a line and dropped where the line breaks. Spaces before the first word (an
+        indent) stay with it."""
+        lines, cur = [], None
+        parts = re.split(r"( +)", para.rstrip(" "))
+        if parts[0] == "" and len(parts) > 2:       # indent: glue it to the first word
+            parts = [parts[1] + parts[2]] + parts[3:]
+        for i in range(0, len(parts), 2):
+            word, gap = parts[i], parts[i - 1] if i else ""
+            cand = word if cur is None else cur + gap + word
+            if cur is None or self.width(cand) - self.hang <= px:
                 cur = cand
             else:
                 lines.append(cur)

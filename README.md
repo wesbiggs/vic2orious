@@ -135,8 +135,9 @@ Generated files go to `build/prg/` (`<name>-p.png` and `<name>-n.png` are 16-col
 ![Example with accompanying text in custom font](docs/text-gaoler.png)
 
 Put the text in `input/<name>.txt`: paragraphs separated by blank lines, a first line
-starting with `# ` becomes the title. It is wrapped to fit the space to the right of the image (or
-below a very wide image); the build tells you if it does not fit. An NTSC picture is
+starting with `# ` becomes the title. Extra blank lines, indents and runs of spaces are kept
+(a no-break space joins two words). It is wrapped to fit the space to the right of the image (or
+below a very wide image, one empty row under it unless that leaves no room for a line); the build tells you if it does not fit. An NTSC picture is
 wider than its PAL version (NTSC pixels are narrower), leaving less room: `input/<name>-n.txt`
 replaces the story there (and `-p.txt` on PAL). The castle, gaoler and princess examples
 have shorter NTSC stories.
