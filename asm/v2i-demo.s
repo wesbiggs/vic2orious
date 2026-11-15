@@ -1,7 +1,9 @@
 ; v2i demo: the smallest complete v2i program. Shows one image (the first one built),
 ; framed when assembled with FRAME=1, and returns to BASIC when space is pressed.
 ; Assembled with DUAL=1 it holds the image twice, made for PAL and for NTSC, and shows
-; the one that suits the machine.
+; the one that suits the machine. With TEXT=1 it also draws a .v2t text over the screen,
+; demo_txt (DUAL: demo_txt_n on NTSC; a label set to 0 means none), as vic2.prg does
+; for a .v2i/.v2t pair.
 
         .include "v2idemo.inc"          ; generated: demo_img (DUAL: and demo_img_n, NTSC)
 
@@ -10,6 +12,9 @@ FRAME = 0
 .endif
 .ifndef DUAL
 DUAL = 0
+.endif
+.ifndef TEXT
+TEXT = 0
 .endif
 
         .segment "LOADADDR"
@@ -36,6 +41,22 @@ start:  jsr v2i_init
 .if FRAME
         lda #$10                        ; white on black
         jsr v2i_frame
+.endif
+.if TEXT
+        lda #<demo_txt
+        ldy #>demo_txt
+  .if DUAL
+        ldx v2i_system
+        cpx #V2I_NTSC
+        bne :+
+        lda #<demo_txt_n
+        ldy #>demo_txt_n
+:
+  .endif
+        cpy #0                          ; no text for this system
+        beq :+
+        jsr v2t_draw
+:
 .endif
         jsr v2i_start
         lda #$7f                        ; keyboard column 7: space = row bit 4
@@ -69,3 +90,6 @@ fail:   pha                             ; v2i_show failed: say why, back to BASI
         jmp ($a002)                     ; BASIC warm start
 
         .include "v2i.inc"
+.if TEXT
+        .include "v2t.inc"
+.endif

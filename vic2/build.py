@@ -275,7 +275,7 @@ def convert_image(path, log=print, frame=False, leading=TEXT_LEADING, at=None, f
                   centre=None, suffix=""):
     """Convert one image (image_source(path): its -p/-n file if any) to build/<name>.v2i,
     reusing the previous result (build/<name>.json) when nothing it depends on changed,
-    unless force; then pack its text (input/<name>.txt) to build/<name>.txt.prg with the
+    unless force; then pack its text (input/<name>.txt) to build/<name>.v2t with the
     current font. Without at, the image is centred if centre (default: if it has no text,
     see has_text). suffix is added to the name of the build files (a second version of
     the image), and leaves out the text."""
@@ -517,7 +517,7 @@ def make_text(path, g, name, log, leading=TEXT_LEADING):
         log("  %s: no room for text" % name)
         return None
     col0, row0, width, height = area
-    out = os.path.join(BUILD, name + ".txt.prg")
+    out = os.path.join(BUILD, name + ".v2t")
     n = pack_text(text, out, col0, row0, width, height * 8, leading, name, log)
     log("  %s: text area %dx%d at column %d, row %d: %d lines, leading %d, font %s" %
         (name, width, height, col0, row0, n, leading, font.name))
@@ -552,7 +552,7 @@ def v2i_disk_name(name):
 
 
 def text_disk_name(name):
-    return disk_name(name)[:12] + ".TXT"
+    return disk_name(name)[:12] + ".V2T"
 
 
 def dual_base(name):
@@ -565,9 +565,9 @@ SUFFIX = {"pal": "-P", "ntsc": "-N"}
 
 def dual_texts(pal_infos, ntsc_infos):
     """Text files of the dual disk: [(PAL disk name, NTSC disk name, [(file, disk name)])],
-    one per image (names None without a text). One shared NAME.TXT when both systems lay the
-    text out the same (same position and size), else NAME-P.TXT and NAME-N.TXT (name cut
-    like dual_base)."""
+    one per image (names None without a text). One shared NAME.V2T when both systems lay the
+    text out the same (same position and size), else NAME-P.V2T and NAME-N.V2T; NAME is
+    dual_base, the name the dual viewer is given (it adds .V2T to it)."""
     res = []
     for p, n in zip(pal_infos, ntsc_infos):
         def data(inf):
@@ -576,10 +576,10 @@ def dual_texts(pal_infos, ntsc_infos):
             with open(inf["txt"], "rb") as f:
                 return f.read()
         if data(p) == data(n):
-            name = text_disk_name(p["name"]) if p["txt"] else None
+            name = dual_base(p["name"]) + ".V2T" if p["txt"] else None
             res.append((name, name, [(p["txt"], name)] if name else []))
             continue
-        names = [dual_base(inf["name"]) + SUFFIX[std] + ".TXT" if inf["txt"] else None
+        names = [dual_base(inf["name"]) + SUFFIX[std] + ".V2T" if inf["txt"] else None
                  for inf, std in ((p, "pal"), (n, "ntsc"))]
         res.append((names[0], names[1],
                     [(inf["txt"], nm) for inf, nm in zip((p, n), names) if nm]))
@@ -777,7 +777,7 @@ def v2t_demo_text(infos):
     if story:
         return story
     font = fonts.current()
-    out = os.path.join(BUILD, "v2tdemo.txt.prg")
+    out = os.path.join(BUILD, "v2tdemo.v2t")
     pack_text(V2T_DEMO_TEXT, out, 2, 0, 36, 170 - 2 * font.height, 2, "v2t demo", print)
     return out
 

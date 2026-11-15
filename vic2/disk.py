@@ -10,7 +10,7 @@ characters), onto build/dual/pictures.d64. The programs come from the same direc
 (thumbnails always; viewer with --viewer), so build first (make, make NTSC=1, make
 DUAL=1). The demo's centred copies (*-centred.v2i) are left out, and so are files that
 are not .v2i version 5 or not for the disk's video system. Names are those the build gives:
-the first 12 characters + .v2i (texts: + .txt, the packed build/<system>/<name>.txt.prg,
+the first 12 characters + .v2i (texts: + .v2t, the packed build/<system>/<name>.v2t,
 with --viewer). D64 if everything fits (664 blocks, 144 files), else D81, unless --disk.
 """
 
@@ -42,8 +42,8 @@ def name_of(path):
 
 
 def text_of(path):
-    """The packed story next to a .v2i (build/<system>/<name>.txt.prg), or None."""
-    t = os.path.join(os.path.dirname(path), name_of(path) + ".txt.prg")
+    """The packed story next to a .v2i (build/<system>/<name>.v2t), or None."""
+    t = os.path.join(os.path.dirname(path), name_of(path) + ".v2t")
     return t if os.path.exists(t) else None
 
 
@@ -105,13 +105,13 @@ def main():
         if not t:
             continue
         if a.dual:
-            # one NAME.TXT if both systems' texts are the same (the viewer falls back to
-            # it), else NAME-P.TXT / NAME-N.TXT, as build.dual_texts names them
+            # one NAME.V2T if both systems' texts are the same (the viewer falls back to
+            # it), else NAME-P.V2T / NAME-N.V2T, as build.dual_texts names them
             other = os.path.join(ROOT, "build", "ntsc" if s == "pal" else "pal",
-                                 n + ".txt.prg")
+                                 n + ".v2t")
             same = (os.path.exists(other) and
                     open(other, "rb").read() == open(t, "rb").read())
-            tname = text_disk_name(n) if same else dual_base(n) + SUFFIX[s] + ".TXT"
+            tname = dual_base(n) + (".V2T" if same else SUFFIX[s] + ".V2T")
         else:
             tname = text_disk_name(n)
         if tname not in texts:

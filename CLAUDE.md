@@ -3,7 +3,7 @@
 Converts C64-palette PNGs into C64 hires bitmap + per-line multiplexed hires sprites (or a
 multicolour bitmap with X-expanded sprites), aiming for pixel-perfect output, and plays the results on a real (emulated) C64: a slideshow PRG
 with the images embedded, a disk slideshow (`diskshow`) that loads every image in turn, a
-viewer PRG that loads `.v2i` image files (plus optional `.txt` narrative files drawn
+viewer PRG that loads `.v2i` image files (plus optional `.v2t` narrative files drawn
 beside the picture) from disk by name, a thumbnail browser (`thumbs`: reads only the
 start of each `.v2i`, where thumbnail and metadata are), an interactive `ask` demo, and two smooth
 scrolling text demos (a prepared page; a stream the C64 wraps itself).
@@ -24,7 +24,7 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   and the EDF write scheduler with per-line checkpoints. `set_standard("pal"|"ntsc")`
   switches module globals (`CYCLES`, `LINES`, `SPR_P`, `Y_AFTER`, `FPS`) for the whole
   process; `build --ntsc` calls it before converting.
-- `vic2/build.py`: CLI. Converts images, writes `.v2i`/`.txt` files, generates
+- `vic2/build.py`: CLI. Converts images, writes `.v2i`/`.v2t` files, generates
   `images.inc`, `diskshow.inc`, `ask.inc` and `font.inc`, assembles with cl65, makes the
   D64 (or D81), and optionally verifies in VICE, all in one build directory per video
   system: `build/pal/`, `build/ntsc/` (`build/dual/` for the dual disk). The file formats
@@ -35,6 +35,11 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   `v2i-demo.s` with `DUAL=1`. `--verify` checks both in VICE, `--run [pal|ntsc]`;
   `make prg PIC=path [DITHER=mode] [CHROMA=S] [PALETTE=F.vpl] [SIZE=WxH] [LINES=N|none] [MC=1]`
   (`-m`, multicolour: PAL and NTSC of a 160x200 photo fit one PRG, ~37K).
+  Given `.v2i` files (each followed by its `.v2t`; one, or a PAL and an
+  NTSC one) it converts nothing: `from_files` assembles `v2i-demo.s` with `TEXT=1`
+  (`demo_txt`/`demo_txt_n`, 0 = none; `DUAL=1` for two) in `build/prg/v2i/`, frame
+  from the metadata, `--font` checked against the text's height; `--verify` needs the
+  build's `<name>.json` beside each `.v2i` (`model`).
 - `vic2/dither_pick.py`: the dither recommender's metrics (blurred RMS, SSIM of the
   luma, a*b* colour error), `rank`, `CANDIDATES`, `shown` (through the converter) and
   `estimate` (img2c64 `-t`: top-2 colours per cell, one exact cover per line as if every
@@ -43,7 +48,7 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 - `vic2/disk.py`: `make pictures` (`python3 -m vic2.disk [--ntsc|--dual] [--viewer]
   [--disk K] [-o FILE] [FILE.v2i...]`): the build directory's `.v2i` files (not
   `*-centred`, not older versions or the other system's) with `thumbs.prg` (and
-  `viewer.prg` and the `.txt.prg` stories) onto `build/<pal|ntsc|dual>/pictures.d64`/`.d81`,
+  `viewer.prg` and the `.v2t` stories) onto `build/<pal|ntsc|dual>/pictures.d64`/`.d81`,
   named as `build.py` names them (`v2i_disk_name`; dual: `dual_base` + `-P`/`-N`, texts
   shared when the same). Needs a build first for the programs.
 - `vic2/info.py`: `python3 -m vic2.info [-t DIR] FILE.v2i...` prints a `.v2i`'s header,
@@ -150,7 +155,7 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   `src` does the same for the json dependencies), optional stories (`name.txt`) and optional demo questions
   (`name.ask`, builds `build/pal/ask-name.prg`); texts too can be per system
   (`name-p.txt`/`name-n.txt`, `.ask` likewise: `text_source`, Makefile `txtsrc`; the dual
-  disk then gets `NAME-P.TXT`/`NAME-N.TXT`, `dual_texts`). The castle, gaoler and princess
+  disk then gets `NAME-P.V2T`/`NAME-N.V2T`, `dual_texts`). The castle, gaoler and princess
   examples are `-p` (the originals, Pepto) and `-n` (Nov 2026: widened by 0.936/0.75 with
   Lanczos, 4x oversampled, re-dithered by img2c64 `-a none -P pepto.vpl -s WxH`, castle
   144x200, the others 160x128) with shorter `-n.txt` stories (the text area is narrower). `images/` holds older test images (local
@@ -257,11 +262,12 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 - Dual disk (`build --dual`, `make DUAL=1`): `build_system` runs for PAL and NTSC (cached
   conversions, own disks), then `build_dual` writes `build/dual/` with diskshow and viewer
   assembled `DUAL=1`: they call `v2i_detect` (KERNAL on) and add `-P.V2I`/`-N.V2I` to the
-  image names (base cut to 10 by `dual_base`). A text is shared (`NAME.TXT`) when both
+  image names (base cut to 10 by `dual_base`). A text is shared (`NAME.V2T`, NAME = `dual_base`, as the viewer forms it; was the
+  first 12 chars, which the viewer missed for names over 10) when both
   systems pack it byte for byte the same (same position and size), else written as
-  `NAME-P.TXT`/`NAME-N.TXT` (`dual_texts`; sizes differ with `-p`/`-n` inputs): diskshow
+  `NAME-P.V2T`/`NAME-N.V2T` (`dual_texts`; sizes differ with `-p`/`-n` inputs): diskshow
   gets a text name table per system (`tname`, `ntname`); the viewer, when the suffixed
-  `.V2I` loaded, swaps its `V2I` for `TXT` and falls back to `NAME.TXT`. The v2i demo is assembled `DUAL=1` there too, with the first image's
+  `.V2I` loaded, swaps its `V2I` for `V2T` and falls back to `NAME.V2T`. The v2i demo is assembled `DUAL=1` there too, with the first image's
   PAL and NTSC `.v2i` both embedded (`demo_img`, `demo_img_n`), picked by `v2i_system`
   after `v2i_init`; it replaces the `v2i demo-p`/`-n` pair on the dual disk. `--verify`
   with `--dual` also boots the dual diskshow, the dual viewer (typing the first image's
@@ -288,7 +294,7 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   bitmap; each byte is shifted by x & 7 (self-modified jump into an unrolled shift: 1-4
   right, 5-7 as 3-1 left) and ORed into two bitmap bytes (pp, pp2 = pp + 8; +320 at a
   char row's bottom). The OR is needed: neighbouring glyphs share bitmap bytes. Lines
-  are H + leading pixels apart (H = font height, stored in `.txt` byte 8 and checked by
+  are H + leading pixels apart (H = font height, stored in `.v2t` byte 8 and checked by
   `v2t_draw`; `build --leading`, default 2), so a line touches every char row its H lines
   reach, and all of them get the line's colour (the later line wins a shared row). The
   text layout depends on the font; it is packed on every build, outside the conversion
@@ -336,7 +342,7 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   of `_expected.png`) and a key hashing the png, frame/at, the video system,
   `CACHE_VERSION` and `CACHE_SOURCES` (convert, timing, palette, thumb, `__init__` for the version). Builds reuse it;
   `--force` reconverts. build.py itself is not hashed: bump `CACHE_VERSION` when changing
-  how `.v2i` is packed. Texts are not cached: `convert_image` packs the `.txt` again on
+  how `.v2i` is packed. Texts are not cached: `convert_image` packs the `.txt` into a `.v2t` again on
   every run (milliseconds), so editing a story, `--font` or `--leading` never reconverts
   the image. The Makefile converts each image in its own
   `--convert-only` run (target `build/<system>/<name>.json`, so `make -j` parallelises), then runs
@@ -401,7 +407,8 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   (`v2i_disk_name`; Nov 2026, so the thumbnail browser can find them in the directory;
   the dual disk's are `dual_base` + `-p.v2i`/`-n.v2i`); the viewer tries the typed name +
   `.v2i` first (a typed `.v2i` is dropped first), then the name as typed. Text files are
-  the first 12 chars + `.txt`.
+  the first 12 chars + `.v2t` (`.txt` until Nov 2026; the source story stays
+  `input/<name>.txt`, the packed text is `build/<system>/<name>.v2t`).
 
 ## What has been tried
 
@@ -509,7 +516,7 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 - C64-side word wrap for `.txt`/`.v2t` drawing (`asm/stream.s` has one for its stream);
   scrollback in the stream demo (it scrolls down only and drops lines above the screen);
   a real stream source (RS-232 or disk, buffered by an IRQ); custom fonts from a PNG; fonts loaded at run
-  time (the `.txt` could name one; the drawer would read the record through a pointer
+  time (the `.v2t` could name one; the drawer would read the record through a pointer
   instead of the assembled labels); mega fonts.
 - Text scrolling below a still image (raster split): `v2i_hook` (cycle exact, right
   after the kernel) switches `$dd00` to the text bitmap's bank and YSCROLL to the text's

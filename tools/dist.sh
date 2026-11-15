@@ -32,8 +32,8 @@ for sys in pal ntsc; do
     d=$(disk "build/$sys")
     [ -n "$d" ] || { echo "no build/$sys disk" >&2; exit 1; }
     cp "$d" "$dir/"
-    for p in build/$sys/*.prg; do      # the programs, not the verify builds or text PRGs
-        case $(basename "$p") in verify_*|*.txt.prg) continue ;; esac
+    for p in build/$sys/*.prg; do      # the programs, not the verify builds
+        case $(basename "$p") in verify_*) continue ;; esac
         cp "$p" "$dir/"
     done
     cp LICENSE "$dir/"

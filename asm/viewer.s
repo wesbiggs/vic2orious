@@ -1,11 +1,11 @@
 ; vic2orious viewer: loads a .v2i image from disk with the KERNAL and shows it. It tries
 ; the name + ".v2i" first (the build's disk names; a typed ".v2i" is not doubled), then
-; the name as typed. If a text file named like the image (first 12 characters + ".TXT")
+; the name as typed. If a text file named like the image (first 12 characters + ".V2T")
 ; exists, it is drawn next to the image. Space returns to the file prompt; an empty file
 ; name exits to BASIC.
 ; Assembled with DUAL=1 (a disk with PAL and NTSC images) it first tries the name +
 ; "-p.v2i" or "-n.v2i", whichever suits the machine, then the name as typed; with the
-; first, the text is name + "-p.txt" / "-n.txt" if that exists, else as above.
+; first, the text is name + "-p.v2t" / "-n.v2t" if that exists, else as above.
 
 CHRIN   = $ffcf
 CHROUT  = $ffd2
@@ -157,7 +157,7 @@ prompt: lda #<msg_prompt
         lda #0
         sta hastext
 .if DUAL
-        lda dualname                    ; loaded name + "-P.V2I": try name + "-P.TXT"
+        lda dualname                    ; loaded name + "-P.V2I": try name + "-P.V2T"
         beq @shared
         ldy namelen
         ldx #0
@@ -178,7 +178,7 @@ prompt: lda #<msg_prompt
         bne view
 @shared:
 .endif
-        ldx namelen                     ; optional text: name[0..11] + ".TXT"
+        ldx namelen                     ; optional text: name[0..11] + ".V2T"
         cpx #12
         bcc :+
         ldx #12
@@ -281,7 +281,7 @@ print:  sta vptr                        ; print zero-terminated string at A/Y
 
 magic:  .byte "V2I"
 tmagic: .byte "V2T", 4
-txtext: .byte ".TXT"
+txtext: .byte ".V2T"
 v2iext: .byte ".V2I"
 msg_prompt:
         .byte 13, "V2I VIEWER - FILE NAME (EMPTY = QUIT)", 13, "? ", 0

@@ -6,7 +6,7 @@ doesn't wrap. `vic2/build.py` makes one from `input/<name>.txt` for the free are
 the image. `asm/v2t.inc` draws it ([v2t-lib.md](v2t-lib.md)).
 
 On disk it is a PRG file with load address `$1800`, named like its image (cut to 12
-characters) plus `.txt`. Like `.v2i`, it can be loaded anywhere.
+characters) plus `.v2t`. Like `.v2i`, it can be loaded anywhere.
 
 ## Layout
 

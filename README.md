@@ -125,6 +125,21 @@ make prg PIC=photo.jpg DITHER=hybrid LINES=none           # hybrid without its l
 make prg PIC=photo.jpg MC=1                               # multicolour, as the fifth
 ```
 
+It also takes images the build has already made, with their texts: a `.v2i` file, each
+followed by its text if it has one (the build's `<name>.v2t`, or `NAME.V2T` from a
+disk). Nothing is converted, and the image stays where the build placed it (framed if
+it was). Give one PAL and one NTSC `.v2i` for a PRG that runs on both. The font isn't
+stored in the text, so pass the `--font` (make: `FONT`) the build used; the PRG refuses
+a text laid out for another font height. `--verify` works when the build's `<name>.json`
+is beside the `.v2i`.
+
+```bash
+python3 -m vic2.prg build/pal/princess.v2i build/pal/princess.v2t
+python3 -m vic2.prg --font fonts/NLQ.cvt:12 -o splash.prg \
+    build/pal/splash.v2i build/pal/splash.v2t build/ntsc/splash.v2i build/ntsc/splash.v2t
+make prg PIC='build/pal/princess.v2i build/pal/princess.v2t'
+```
+
 Generated files go to `build/prg/` (`<name>-p.png` and `<name>-n.png` are 16-color target images, and the conversions are placed in
 `pal/` and `ntsc/`.
 `--run` (or `--run ntsc`) starts the generated program in VICE. Both images have to fit in one PRG
@@ -184,7 +199,7 @@ are two cycles longer.
 **Both on one disk:** `make DUAL=1` builds for both systems and writes
 `build/dual/vic2orious.d81` (or `.d64` if it fits) with every image twice,
 `<name>-p.v2i` and `<name>-n.v2i` (names cut to 10 characters), the stories once
-(twice, `<name>-p.txt` and `<name>-n.txt`, when the two versions of an image differ in
+(twice, `<name>-p.v2t` and `<name>-n.v2t`, when the two versions of an image differ in
 size and the text sits differently beside them), and a
 `diskshow` and `viewer` that detect the machine and load the matching files (in the
 viewer, type the name without the ending). `v2i demo` holds both versions of its image

@@ -167,10 +167,12 @@ run-stream: build
 run-d64: build
 	$(VICE) $(DRIVE) -autostart $(DISKIMG)
 
-# one picture (PIC=path) -> <name>.prg here, both kernels in it (python3 -m vic2.prg)
+# one picture (PIC=path) -> <name>.prg here, both kernels in it (python3 -m vic2.prg);
+# or built .v2i files with their texts (PIC='a.v2i a.v2t'), drawn in FONT
 prg:
 	$(if $(strip $(PIC)),,$(error prg needs PIC=path/to/picture))
-	$(PYTHON) -m vic2.prg $(if $(strip $(DITHER)),-d $(strip $(DITHER))) \
+	$(PYTHON) -m vic2.prg $(if $(filter %.v2i %.V2I,$(PIC)),$(if $(strip $(FONT)),--font $(strip $(FONT)))) \
+		$(if $(strip $(DITHER)),-d $(strip $(DITHER))) \
 		$(if $(strip $(CHROMA)),-c $(strip $(CHROMA))) \
 		$(if $(strip $(PALETTE)),-P $(strip $(PALETTE))) \
 		$(if $(strip $(SIZE)),-s $(strip $(SIZE))) \
@@ -210,6 +212,9 @@ help:
 	@echo "                    shows them), SIZE=WxH (fit that instead of 320x200),"
 	@echo "                    LINES=N|none (hybrid's line budget, default 8), MC=1"
 	@echo "                    (multicolour: half the width, 3 colours per cell + black)"
+	@echo "make prg PIC='x.v2i x.v2t'  a built image (and its text) -> x.prg, no"
+	@echo "                    conversion; FONT as in the build that laid the text out; two"
+	@echo "                    .v2i (PAL and NTSC, each followed by its text): one dual PRG"
 	@echo "make clean          remove build/ (PAL, NTSC and dual builds)"
 	@echo "options: IMAGES='input/a.png ...' FRAME=1 AT=COLUMN,ROW LEADING=n AUTO=n HOLD=n DISK=d64|d81"
 	@echo "         FONT=fonts/NAME.cvt[:SIZE] (GEOS font for the texts; bring your own)"

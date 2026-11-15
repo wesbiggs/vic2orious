@@ -8,7 +8,7 @@
 ; stays until an image shows again.
 ; Assembled with DUAL=1 it is for a disk with both PAL and NTSC images: it loads
 ; <name>-p.v2i or <name>-n.v2i, whichever suits the machine, and the text named for that
-; machine in diskshow.inc (one shared, or <name>-p.txt / -n.txt when the layouts differ).
+; machine in diskshow.inc (one shared, or <name>-p.v2t / -n.v2t when the layouts differ).
 
         .include "diskshow.inc"         ; generated: SHOW_COUNT, HOLD_SECS, file names
 
