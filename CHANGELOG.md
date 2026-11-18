@@ -3,6 +3,7 @@
 Turn any picture into a C64 hires or multicolour bitmap with multiplexed sprites, played by a cycle-exact kernel on PAL and NTSC, plus a proportional text library and demos.
 
 ## New
+- **Choice of VIC bank (format version 6):** `build --bank 1|2|3` (`make BANK=`) picks the bank the programs show images in, and `v2i_bank` selects it at run time. Version 6 files are bank-agnostic: destinations are bank-relative and the kernel has a relocation table for its sprite pointers, so one `.v2i` shows in any bank. Bank 1 works for images that load outside `$4000-$7fff` (the v2i demo with a 14K program; the viewer and diskshow load at `$2800` and cannot yet); bank 2 is limited to 48 sprite blocks (VIC banks 0 and 2 show the character ROM at `$9000-$9fff`).
 - **v2i images and v2t text:** hires bitmap plus per-line multiplexed sprites with a cycle-exact kernel; `v2i.inc` and `v2t.inc` libraries, a slideshow, a disk viewer, an interactive ask demo and single-library demos.
 - **Multicolour images:** `img2c64 -m` makes 160-pixel-wide pictures with three colours per 4x8 cell plus black; X-expanded sprites paint the rest. Floyd-Steinberg photos come out at 0-1.6% wrong pixels (hires: about 10%). Centred, without text or frame.
 - **PAL and NTSC:** build for either (`make NTSC=1`) or a dual disk with both (`make DUAL=1`); the dual demo PRG picks its image by `v2i_system`.

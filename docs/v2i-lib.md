@@ -25,10 +25,10 @@ BASIC can return to it with `RTS`.
 ## Lifecycle
 
 ```
-        jsr v2i_init                    ; take over the machine (once)
-        lda #<image                     ; any address outside $c000-$ffff
+        jsr v2i_init                    ; take over the machine (once; v2i_bank selects the bank)
+        lda #<image                     ; any address outside the VIC bank (v2i_bank)
         ldy #>image
-        jsr v2i_show                    ; unpack into VIC bank 3
+        jsr v2i_show                    ; unpack into VIC bank v2i_bank
         bcs error                       ; not shown: jsr v2i_exit, v2i_errmsg says why
         jsr v2i_start                   ; image on screen, raster IRQ running
         ...                             ; your program; v2i_hook runs every frame
@@ -36,15 +36,31 @@ BASIC can return to it with `RTS`.
         jsr v2i_exit                    ; or give everything back to the KERNAL
 ```
 
+## VIC banks
+
+`v2i_bank` (1, 2 or 3; default `V2I_BANK`, which is 3) is the bank `v2i_init` selects and
+`v2i_show` unpacks into. The same `.v2i` shows in any bank: its destinations and sprite
+pointers are relocated for the bank at show time. Limits, all from the VIC-II:
+
+- **Sprite blocks** are in the bank from its base + `$400` up to `$3fff`, at most 128 blocks
+  (`BANK_TOP_SLOT` in `vic2/build.py`: 127 for banks 1 and 3). Bank 2 has only blocks 16-63
+  (`$8400-$8fff`): VIC banks 0 and 2 show the character ROM at their `$1000-$1fff`, so sprite
+  data there reads glyphs. The build refuses an image with more blocks for `--bank 2`.
+- **Loading**: the file must lie outside the bank (`V2I_ERR_BANK` otherwise), and the program
+  itself must end below it: `vic2/build.py` refuses a program that overlaps the bank
+  (`showing an image clears` the bank). The viewer, diskshow and the ask demo load images at
+  `$2800`, which overlaps bank 1 for images over about 6K, so they cannot show those in bank 1.
+- **Text** (`v2t.inc`) is compiled for the bank (see `V2T_BITMAP` in `v2t-lib.md`).
+
 ## Routines
 
 A/Y = address means A = low byte, Y = high byte. All routines may change A, X and Y.
 
 | routine | input | does |
 |---|---|---|
-| `v2i_init` | | `SEI`, ROMs out (`$01` = `$35`), CIA interrupts off, VIC bank 3, own IRQ/NMI vectors. Saves `$d000-$d02e`, `$dd00`/`$dd02`, `$01` and its zero page block for `v2i_exit`. Detects the video system (`v2i_system`, up to one frame). |
+| `v2i_init` | | `SEI`, ROMs out (`$01` = `$35`), CIA interrupts off, VIC bank `v2i_bank` (1-3, default `V2I_BANK` = 3; set it before this call), own IRQ/NMI vectors. Saves `$d000-$d02e`, `$dd00`/`$dd02`, `$01` and its zero page block for `v2i_exit`. Detects the video system (`v2i_system`, up to one frame). |
 | `v2i_detect` | | Sets `v2i_system` (see below) from the last raster line: up to one frame, interrupts held off meanwhile. Works with the KERNAL on too, before `v2i_init`, for example to pick which file to load. `v2i_init` calls it. |
-| `v2i_show` | A/Y = `.v2i` | Clears `$c000-$feff` (and colour RAM for a multicolour image), unpacks the image, points the IRQ at its kernel and sets the image info (it calls `v2i_info`). Only while stopped. Takes 0.2-0.4 s (about 215k cycles for 128x128, 360k for 320x200; the kernel runs where it is, only bitmap, screen and sprites are decoded). C=1: not shown, A = `V2I_ERR_FORMAT` (not a version 5 `.v2i`) or `V2I_ERR_SYSTEM` (the file is for the other video system, or the machine's VIC-II is not supported). |
+| `v2i_show` | A/Y = `.v2i` | Clears the bank (`$0000-$3f3f` from its base; colour RAM for a multicolour image), relocates the kernel's sprite pointers for the bank (the kernel is changed in place: show a loaded file once, or load it again), unpacks the image, points the IRQ at its kernel and sets the image info (it calls `v2i_info`). Only while stopped. Takes 0.2-0.4 s (about 215k cycles for 128x128, 360k for 320x200; the kernel runs where it is, only bitmap, screen and sprites are decoded). C=1: not shown, A = `V2I_ERR_FORMAT` (not a version 6 `.v2i`), `V2I_ERR_SYSTEM` (the file is for the other video system, or the machine's VIC-II is not supported) or `V2I_ERR_BANK` (the file lies inside the bank: load it outside `$4000-$7fff` for bank 1, `$8000-$bfff` for bank 2 or `$c000-$ffff` for bank 3). |
 | `v2i_info` | A/Y = `.v2i` | Checks the magic and version and sets the image info, `v2i_tptr`, `v2i_mptr` and `v2i_mlen` (see below). Needs only the start of the file (header, thumbnail, metadata), and neither `v2i_init` nor the KERNAL off. C=1: A = `V2I_ERR_FORMAT`. |
 | `v2i_thumb` | A/Y = room for the sprite data | After `v2i_info`: shows the thumbnail on sprites 0 to n-1 at X = `v2i_tx`, Y = `v2i_ty` (sprite coordinates; default 24, 50, the screen's top left corner). Copies their data to A/Y (64 bytes a sprite, up to 512; 64-byte aligned, inside the VIC bank in use) and sets their pointers (in the screen `$dd00` and `$d018` select), colours and positions, makes them unexpanded hires sprites in front of the picture, and turns on just these (`$d015`). C=1: the file has no thumbnail. Else A = its background colour, which the host paints behind the 24x21 area (or not: `asm/thumbs.s` puts three by three reverse spaces in that colour under it), and `v2i_tn` = n. |
 | `v2i_errmsg` | A = error | A/Y = a zero-terminated PETSCII message for an error from `v2i_show`, such as "THIS IMAGE IS FOR AN NTSC C64". Print it after `v2i_exit` (KERNAL `CHROUT`). |

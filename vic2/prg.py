@@ -33,6 +33,7 @@ import subprocess
 import sys
 
 from . import build, timing
+from .build import V2I_VERSION
 
 TOOL = os.path.join(build.ROOT, "tools", "img2c64.py")
 PRG_BUILD = os.path.join(build.ROOT, "build", "prg")
@@ -198,9 +199,9 @@ def from_files(a):
             hdr, meta = build.read_v2i(v2i)
         except (OSError, AssertionError) as e:
             raise SystemExit(str(e))
-        if hdr["version"] != 5:
-            raise SystemExit("%s: .v2i version %d; v2i_show takes version 5 (build it "
-                             "again)" % (v2i, hdr["version"]))
+        if hdr["version"] != V2I_VERSION:
+            raise SystemExit("%s: .v2i version %d; v2i_show takes version %d (build it "
+                             "again)" % (v2i, hdr["version"], V2I_VERSION))
         std = "ntsc" if hdr["system"] == 1 else "pal"
         if std in images:
             raise SystemExit("%s and %s are both for %s: give one PAL and one NTSC image" % (

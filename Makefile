@@ -10,6 +10,8 @@ X64     ?= x64sc
 IMAGES  ?=                      # input files to build (default: all of input/*.png;
                                 #    name-p.png / name-n.png are image name for PAL / NTSC)
 FRAME   ?=                      # 1: frame the images (build -b)
+BANK    ?=                      # 1, 2 or 3: the VIC bank the programs show images in
+                                #    (build --bank; default 3, $c000-$ffff)
 AT      ?=                      # COLUMN,ROW: place the images there (build --at; default:
                                 #    upper left with a text, else centred)
 LEADING ?=                      # pixel lines between text lines (default 2)
@@ -52,7 +54,8 @@ VICE := $(X64) $(if $(strip $(NTSC)),-ntsc,-pal) -VICIIextpal -VICIIpalette pept
 # options that change the conversion (per system), and all of them
 CBASE      := $(strip $(if $(strip $(FRAME)),-b) $(if $(strip $(AT)),--at $(strip $(AT))) \
               $(if $(strip $(LEADING)),--leading $(strip $(LEADING))) \
-              $(if $(strip $(FONT)),--font $(strip $(FONT))))
+              $(if $(strip $(FONT)),--font $(strip $(FONT))) \
+              $(if $(strip $(BANK)),--bank $(strip $(BANK))))
 FONTFILE   := $(firstword $(subst :, ,$(strip $(FONT))))
 COPTS_pal  := $(CBASE)
 COPTS_ntsc := $(strip --ntsc $(CBASE))

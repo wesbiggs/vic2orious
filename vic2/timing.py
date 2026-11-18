@@ -46,6 +46,25 @@ OPS = {
     "nop": (0xEA, "RR"), "bitzp": (0x24, "RRR"), "inczp": (0xE6, "RRRWW"),
     "stazp": (0x85, "RRW"), "rts": (0x60, "RRRRRR"),
 }
+OPLEN = {0xA9: 2, 0xA2: 2, 0xA0: 2, 0x8D: 3, 0x8E: 3, 0x8C: 3, 0xEA: 1, 0x24: 2,
+         0xE6: 2, 0x85: 2, 0x60: 1}     # bytes per opcode (the ones OPS has)
+
+
+def pointer_hi_offsets(code, ptrs):
+    """Offsets in a kernel of the high byte of every absolute store to an address in ptrs
+    (the sprite pointers). The kernel is decoded instruction by instruction from its start
+    (it is straight-line code made of OPS only), so data bytes cannot match."""
+    out, i = [], 0
+    while i < len(code):
+        op = code[i]
+        if op in (OPS["sta"][0], OPS["stx"][0], OPS["sty"][0]):
+            if code[i + 1] | (code[i + 2] << 8) in ptrs:
+                out.append(i + 2)
+        i += OPLEN[op]
+    assert i == len(code), "kernel does not decode: ends at %d of %d" % (i, len(code))
+    return out
+
+
 LOAD = {"A": "lda#", "X": "ldx#", "Y": "ldy#"}
 STORE = {"A": "sta", "X": "stx", "Y": "sty"}
 DUMMY_ZP = 0x02  # scratch zero page byte used by sync / filler instructions

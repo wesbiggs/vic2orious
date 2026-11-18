@@ -9,7 +9,7 @@ PAL: build/pal/*.v2i onto build/pal/pictures.d64 (or .d81); --ntsc: build/ntsc/;
 characters), onto build/dual/pictures.d64. The programs come from the same directory
 (thumbnails always; viewer with --viewer), so build first (make, make NTSC=1, make
 DUAL=1). The demo's centred copies (*-centred.v2i) are left out, and so are files that
-are not .v2i version 5 or not for the disk's video system. Names are those the build gives:
+are not .v2i version 6 or not for the disk's video system. Names are those the build gives:
 the first 12 characters + .v2i (texts: + .v2t, the packed build/<system>/<name>.v2t,
 with --viewer). D64 if everything fits (664 blocks, 144 files), else D81, unless --disk.
 """
@@ -27,7 +27,7 @@ STANDARDS = {0: "pal", 1: "ntsc"}      # .v2i header byte 24 (timing.SYSTEM_ID)
 
 
 def system_of(path):
-    """('pal' or 'ntsc', None) for a .v2i version 5 file, else (None, why not)."""
+    """('pal' or 'ntsc', None) for a .v2i version 6 file, else (None, why not)."""
     with open(path, "rb") as f:
         head = f.read(2 + 26)
     if len(head) < 28 or head[2:5] != b"V2I":

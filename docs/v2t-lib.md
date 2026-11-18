@@ -15,8 +15,9 @@ has already happened.
 
 | define before the include | default | |
 |---|---|---|
-| `V2T_BITMAP` | `$e000` | 8000-byte bitmap (v2i's): the default of `v2t_bitmap` |
-| `V2T_SCREEN` | `$c000` | 1000 cell colours (v2i's screen): the default of `v2t_screen` |
+| `V2T_BITMAP` | `V2I_BANK * $4000 + $2000` (`$e000` for bank 3) | 8000-byte bitmap in the image's bank (v2i's): the default of `v2t_bitmap` |
+| `V2T_SCREEN` | `V2I_BANK * $4000` (`$c000` for bank 3) | 1000 cell colours (v2i's screen, the bank's base): the default of `v2t_screen` |
+| `V2I_BANK` | `3` | the VIC bank the defaults are in (the build sets it with `--bank`); the text library does not change bank at run time, so set `V2T_BITMAP`/`V2T_SCREEN` yourself for text in another bank |
 | `V2T_ZP` | `$1d` | `V2T_ZP_SIZE` = 13 zero page bytes (just after v2i's default block) |
 
 Glyphs are OR'd into the bitmap, so the CPU must read the bitmap back as RAM: if it sits
