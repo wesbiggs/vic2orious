@@ -50,10 +50,11 @@ from .screen import Screen
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUILD = os.path.join(ROOT, "build", "pal")  # build/ntsc with --ntsc (see use_system)
 ASM = os.path.join(ROOT, "asm")
-V2I_VERSION = 5               # hires and multicolour (V2I_MC); thumbnail and metadata
+V2I_VERSION = 6               # bank-relative; relocation table after the kernel (docs/v2i-format.md)
                               # before the kernel (3 hires, 4 multicolour: after the data)
 V2I_LOAD = 0x2000
 PLAYER_BUF = 0x2800           # diskshow and viewer load images here, texts at $9800
+BANK = 3                      # VIC bank the programs show images in (--bank; V2I_BANK)
 V2T_LOAD = 0x1800
 V2T_VERSION = 4
 TEXT_LEADING = 2              # default pixel lines between text lines (--leading)
@@ -175,7 +176,7 @@ def read_v2i(path):
     return hdr, meta
 
 
-CACHE_VERSION = 8             # bump when the .v2i packing below changes
+CACHE_VERSION = 9             # bump when the .v2i packing below changes
 CACHE_SOURCES = ("convert.py", "timing.py", "palette.py", "thumb.py", "__init__.py")
 
 
@@ -271,6 +272,20 @@ def cached_image(name, key):
     return inf
 
 
+# the highest sprite block (pointer value) a bank can hold: the sprite blocks are in the bank
+# from its base + $400 up to $3fff. VIC banks 0 and 2 show the character ROM at their
+# $1000-$1fff, so bank 2 has only $0400-$0fff (blocks 16-63) for them
+BANK_TOP_SLOT = {1: 127, 2: 63, 3: 127}
+
+
+def check_bank(inf):
+    """Refuse an image whose sprite blocks do not fit the bank the programs show it in."""
+    if inf.get("top_slot", 0) > BANK_TOP_SLOT[BANK]:
+        raise SystemExit("%s: needs sprite blocks up to %d, which bank %d does not have (up to %d; "
+                         "bank 2 also has the character ROM at $9000-$9fff): build with another "
+                         "--bank" % (inf["name"], inf["top_slot"], BANK, BANK_TOP_SLOT[BANK]))
+
+
 def convert_image(path, log=print, frame=False, leading=TEXT_LEADING, at=None, force=False,
                   centre=None, suffix=""):
     """Convert one image (image_source(path): its -p/-n file if any) to build/<name>.v2i,
@@ -290,6 +305,7 @@ def convert_image(path, log=print, frame=False, leading=TEXT_LEADING, at=None, f
         log_stats(inf, log, cached=True)
     else:
         inf = convert_new(src, name, key, log, frame, at, centre)
+    check_bank(inf)
     txt = text_source(path, ".txt")
     if txt and inf["geom"].mc and not suffix:
         log("  %s: multicolour, its text is left out" % name)
@@ -361,7 +377,13 @@ def convert_new(path, name, key, log, frame, at, centre):
         o = (slot - convert.ZERO_SLOT) * 64
         spr[o:o + 64] = blk
     os.makedirs(BUILD, exist_ok=True)
-    packed = [bytes(conv.kernel.code), rle_zero(bmp), rle_zero(scr), rle_zero(spr)]
+    # the kernel stream: the relocation table (count, then the offset from the kernel's
+    # first byte of the high byte of each sprite pointer write; the player sets them for
+    # its VIC bank), then the kernel (docs/v2i-format.md)
+    reloc = timing.pointer_hi_offsets(conv.kernel.code, set(convert.PTR))
+    kstream = (len(reloc).to_bytes(2, "little") + b"".join(o.to_bytes(2, "little") for o in reloc)
+               + bytes(conv.kernel.code))
+    packed = [kstream, rle_zero(bmp), rle_zero(scr), rle_zero(spr)]
     out = conv.render()
     # expected: what the screen shows, in screen pixels (multicolour: each pixel doubled)
     shown = [[c for c in row for _ in range(g.scale)] for row in out]
@@ -371,7 +393,8 @@ def convert_new(path, name, key, log, frame, at, centre):
     bad_lines = sorted(y for y in range(h) if any(out[y][x] != img[y][x] for x in range(w)))
     first_bad = bad_lines[0] if bad_lines else h
     hdr = bytearray(b"V2I") + bytes((V2I_VERSION, g.cols, g.rows, g.col0, g.row0))
-    for v in [len(d) for d in packed] + [0xE000 + 320 * g.row0, 0xC000 + 40 * g.row0,
+    # bitmap and screen destinations are offsets in the VIC bank (bank base + these)
+    for v in [len(d) for d in packed] + [0x2000 + 320 * g.row0, 40 * g.row0,
                                          len(bad_lines), min(wrong_px, 0xFFFF)]:
         hdr += v.to_bytes(2, "little")
     hdr += bytes((timing.SYSTEM_ID[timing.STANDARD],
@@ -393,6 +416,7 @@ def convert_new(path, name, key, log, frame, at, centre):
         f.write(V2I_LOAD.to_bytes(2, "little") + hdr + b"".join(packed))
     size = os.path.getsize(v2i) - 2
     info = dict(name=name, w=w, h=h, geom=g, expected=shown, size=size,
+                top_slot=max(slots) if slots else convert.ZERO_SLOT,
                 bad_lines=bad_lines, wrong_px=wrong_px, first_bad=first_bad, v2i=v2i)
     log_stats(info, log)
     # side-by-side: source | expected C64 output | wrong pixels
@@ -632,7 +656,7 @@ def assemble(out_prg, source="slideshow.s", frame=False, defines=()):
     with open(os.path.join(BUILD, "font.inc"), "w") as f:
         f.write(fonts.current().asm())
     defs = []
-    for d in ["FRAME=%d" % frame] + list(defines):
+    for d in ["FRAME=%d" % frame, "V2I_BANK=%d" % BANK] + list(defines):
         defs += ["--asm-define", d]
     res = subprocess.run(["cl65", "-t", "none", "-C", os.path.join(ASM, "c64.cfg"), "-I", BUILD,
                           "--asm-include-dir", BUILD, "--asm-include-dir", ASM] + defs +
@@ -645,6 +669,13 @@ def assemble(out_prg, source="slideshow.s", frame=False, defines=()):
         if "overflows memory area" in msg:
             raise Overflow("assembly failed:\n" + msg + "\n(the images do not all fit in one PRG)")
         raise SystemExit("assembly failed:\n" + msg)
+    # the bank is cleared when an image is shown: the program must lie outside it
+    end = 0x0801 + os.path.getsize(out_prg) - 2
+    base = BANK * 0x4000
+    if end > base and 0x0801 < base + 0x4000:
+        raise SystemExit("%s: the program ends at $%04x, inside VIC bank %d ($%04x-$%04x), which "
+                         "showing an image clears: build with another --bank"
+                         % (os.path.basename(out_prg), end, BANK, base, base + 0x3fff))
 
 
 SLIDESHOW_SPACE = 0xC000 - 0x0801 - 3000    # a little more than is left for images
@@ -1341,6 +1372,10 @@ def main():
     ap.add_argument("--hold", type=int, default=10,
                     help="seconds per image (max 1000) in diskshow, not counting the loading "
                          "(0: until space)")
+    ap.add_argument("--bank", type=int, choices=(1, 2, 3), default=3,
+                    help="VIC bank the programs show images in (the library's v2i_bank): 3 "
+                         "($c000-$ffff, default), 2 ($8000-$bfff) or 1 ($4000-$7fff; the file "
+                         "must lie outside it, so big images are refused)")
     ap.add_argument("--ntsc", action="store_true",
                     help="make the kernels for NTSC C64s (6567R8) instead of PAL; builds into "
                          "build/ntsc/ instead of build/pal/")
@@ -1354,6 +1389,8 @@ def main():
                     help="convert the images and build nothing else")
     ap.add_argument("--force", action="store_true", help="convert images even if unchanged")
     a = ap.parse_args()
+    global BANK
+    BANK = a.bank
     if a.dual and a.ntsc:
         ap.error("--dual builds both systems; leave out --ntsc")
     if not 0 <= a.auto <= 255:

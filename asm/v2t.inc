@@ -15,8 +15,9 @@
 ;   v2t_paint      A = colour: colour the same cells, leaving the bitmap as it is
 ;
 ; The bitmap (8000 bytes) and screen (the cell colours) are at v2t_bitmap and v2t_screen,
-; $e000 and $c000 by default (where v2i.inc puts them; define V2T_BITMAP and V2T_SCREEN
-; before the include for other defaults, or change the variables at run time). Everything
+; in the VIC bank V2I_BANK (default 3: $e000 and $c000, where v2i.inc puts the image; the
+; screen is at the bank's base, the bitmap at base + $2000; define V2T_BITMAP and V2T_SCREEN
+; before the include for other addresses, or change the variables at run time). Everything
 ; is drawn only in char rows v2t_rtop to v2t_rbot - 1 (default 0-24; rows up to 31 can be
 ; addressed, so a bitmap address 1-7 rows early lets lines start above row 0). Glyphs are OR'd in, so the bitmap must read back as RAM (bank out a ROM above
 ; it). The program sets up the VIC (hires bitmap mode, bank, $d018). Colours are cell
@@ -25,11 +26,14 @@
 .ifndef V2T_ZP
 V2T_ZP = $1d
 .endif
+.ifndef V2I_BANK
+V2I_BANK = 3
+.endif
 .ifndef V2T_BITMAP
-V2T_BITMAP = $e000
+V2T_BITMAP = V2I_BANK * $4000 + $2000
 .endif
 .ifndef V2T_SCREEN
-V2T_SCREEN = $c000
+V2T_SCREEN = V2I_BANK * $4000
 .endif
 
 ; zero page

@@ -1,4 +1,4 @@
-# .v2i image format (version 5)
+# .v2i image format (version 6)
 
 A `.v2i` file holds one converted image: a hires or a multicolour bitmap, its cell
 colours, the sprite data, and a *kernel*. The kernel is 6502 code generated for this image that rewrites the sprite
@@ -7,7 +7,8 @@ thumbnail and the metadata come first, so a program can read them without the re
 `vic2/build.py` writes it, and `asm/v2i.inc` displays it ([v2i-lib.md](v2i-lib.md)).
 
 On disk it is a PRG file with load address `$2000`. The contents don't depend on where
-they're loaded, so a program can load the file anywhere outside `$c000-$ffff` and pass
+they're loaded, so a program can load the file anywhere outside the VIC bank it is shown in
+(`$4000-$7fff` for bank 1, `$8000-$bfff` for bank 2, `$c000-$ffff` for bank 3) and pass
 that address to `v2i_show`.
 
 ## Layout
@@ -18,17 +19,17 @@ All words are little endian. Offsets are from the start of the data, after the P
 | offset | size | field |
 |---|---|---|
 | 0 | 3 | magic `"V2I"` |
-| 3 | 1 | format version: 5 |
+| 3 | 1 | format version: 6 |
 | 4 | 1 | width in cells (width / 8 screen pixels) |
 | 5 | 1 | height in cells (height / 8) |
 | 6 | 1 | character column of the image's left edge |
 | 7 | 1 | character row of the image's top edge |
-| 8 | 2 | kernel length |
+| 8 | 2 | kernel stream length (relocation table and kernel, see [Kernel](#kernel)) |
 | 10 | 2 | bitmap stream length |
 | 12 | 2 | screen stream length |
 | 14 | 2 | sprite stream length |
-| 16 | 2 | bitmap destination: `$e000 + 320 * row` |
-| 18 | 2 | screen destination: `$c000 + 40 * row` |
+| 16 | 2 | bitmap destination in the VIC bank: `$2000 + 320 * row` |
+| 18 | 2 | screen destination in the VIC bank: `40 * row` |
 | 20 | 2 | number of image lines that are not pixel perfect (information only) |
 | 22 | 2 | number of image pixels that are not pixel perfect (information only) |
 | 24 | 1 | video system the kernel is made for: 0 PAL (6569/8565, 63 cycles x 312 lines), 1 NTSC (6567R8/8562, 65 cycles x 263 lines) |
@@ -44,6 +45,11 @@ kernel right after it and the metadata (flags bit 0) at the end, after the sprit
 front so they can be read alone, and has one version number for both modes; players
 (`v2i_show`) take version 5 only. Version 2 kernels were entered on raster line 2.
 Version 1 had no video system byte (always PAL) and a 24-byte header.
+
+Version 6 has the same header and streams, but the destinations are offsets in the VIC bank
+(bank base + offset), so the file is the same whichever bank it is shown in, and the kernel
+has a relocation table in front of it (see [Kernel](#kernel)). Version 5 files need building
+again.
 
 ## Thumbnail
 
@@ -146,13 +152,13 @@ the metadata (`-t DIR` also writes the thumbnail as a PNG).
 
 All three streams are **zero-run encoded**: `$00, n` stands for n zero bytes (n =
 1..255), any other byte is itself, and `$00, $00` ends the stream. (`v2i.inc` clears
-bank 3 first and skips the zero runs instead of writing them.)
+bank first and skips the zero runs instead of writing them.)
 
 - **Bitmap:** whole 320-byte screen rows, one per character row the image covers. They
   decode straight to the bitmap destination, so cells outside the image are 0.
 - **Screen:** whole 40-byte rows of cell colours, `fg << 4 | bg`, decoded to the screen
   destination.
-- **Sprites:** 64-byte sprite blocks, decoded to `$c400` (sprite pointer 16). Block 16 is
+- **Sprites:** 64-byte sprite blocks, decoded to bank base + `$400` (sprite pointer 16). Block 16 is
   all zero; the kernel points sprites at it outside the image. The stream holds as many
   blocks as the image uses. Each block holds one 21-line stretch of one sprite.
 
@@ -163,11 +169,18 @@ only works on the video system in byte 24: on the other one every write lands at
 wrong cycle (`v2i_show` refuses such a file). The sprite and bitmap data are converted
 together with the kernel, so they differ between PAL and NTSC files too. It assumes:
 
-- **Screen layout:** VIC bank 3 (`$c000-$ffff`), with the screen at `$c000`, sprite
-  pointers at `$c3f8` and the bitmap at `$e000`. It sets `$d011` = `$3b`, `$d016` = `$08` and
-  `$d018` = `$08`, but doesn't select the bank itself or touch the border and background
-  colours (`v2i_start` sets them to black: a colour write leaves a grey dot on the 85xx,
-  and the kernel's first lines are visible on NTSC).
+- **Screen layout:** in any VIC bank (base B = `$4000 * bank`), with the screen at B, sprite
+  pointers at B + `$3f8` and the bitmap at B + `$2000`. It sets `$d011` = `$3b`, `$d016` = `$08`
+  and `$d018` = `$08` (all bank-relative), but doesn't select the bank itself or touch the
+  border and background colours (`v2i_start` sets them to black: a colour write leaves a grey
+  dot on the 85xx, and the kernel's first lines are visible on NTSC). Its sprite pointer
+  writes are absolute, so the library relocates them for the bank (below).
+- **Relocation table:** the kernel stream starts with `count` (2 bytes), then `count` 2-byte
+  offsets, each the offset from the kernel's first byte of the high byte of one sprite
+  pointer write (`sta`, `stx` or `sty` to `$c3f8-$c3ff`; the build puts `$c3` there). The
+  kernel code follows the table. `v2i_show` writes the bank's high byte + 3 at each offset:
+  the pointers keep their low bytes (`$f8-$ff`), so relocating is idempotent. Each entry costs
+  2 bytes (93 entries for `input/dragon.png`, 64 for `input/princess-p.png`).
 - **Entry time:** it is entered on raster line 9, between cycles 20 and 47 of that line.
   Line 9 is below the sprite DMA that can still be running from the previous frame:
   `$d015` = 0 does not stop a sprite's 21-line block, and on NTSC (263 lines) the blocks
