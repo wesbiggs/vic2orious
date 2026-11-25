@@ -3,7 +3,7 @@
 // (docs/v2i-format.md, version 6).
 
 import * as timing from "./timing.js";
-import { Converter, Geometry, resetCaches, blockOf, blockStart, PTR, ZERO_SLOT } from "./convert.js";
+import { Converter, resetCaches, blockOf, blockStart, PTR, ZERO_SLOT } from "./convert.js";
 import { VERSION } from "./version.js";
 
 export const V2I_VERSION = 6, V2I_LOAD = 0x2000, PLAYER_BUF = 0x2800, BANK = 3;
@@ -57,11 +57,11 @@ export function place(cols, rows) {
 
 const le16 = (v) => [v & 0xff, (v >> 8) & 0xff];
 
-/** Convert rows (palette indices; multicolour: wide pixels) for system and pack them.
- * settings: img2c64's text; thumb: thumbnail bytes; imageName: the "image" line.
- * Returns {v2i (Uint8Array, with the load address), w, h, rendered, wrong, badLines,
- * size, topSlot, mc}. Throws if the result does not fit the players' buffer or the bank. */
-export function convertImage(rows, system, { mc = false, settings = "", thumb, imageName = "picture.png", date, progress = null } = {}) {
+/** Convert rows (palette indices; multicolour: wide pixels) for system, placed as the
+ * build places an image without text (centred). The slow part of a .v2i: pack() adds the
+ * thumbnail and metadata. Returns {hdr, streams, w, h, rendered, wrong, badLines,
+ * topSlot, mc}, all plain data. Throws if the sprite blocks do not fit the bank. */
+export function convertImage(rows, system, { mc = false, progress = null } = {}) {
   if (timing.STANDARD !== system) { timing.setStandard(system); resetCaches(); }
   const h = rows.length, w = rows[0].length, cw = mc ? 4 : 8;
   const [col0, row0] = place(w / cw, h / 8);
@@ -109,7 +109,7 @@ export function convertImage(rows, system, { mc = false, settings = "", thumb, i
   const code = conv.kernel.code;
   const reloc = timing.pointerHiOffsets(code, new Set(PTR));
   const kstream = [...le16(reloc.length), ...reloc.flatMap(le16), ...code];
-  const packed = [kstream, rleZero(bmp), rleZero(scr), rleZero(spr)];
+  const streams = [kstream, rleZero(bmp), rleZero(scr), rleZero(spr)];
   const out = conv.render();
   let wrong = 0;
   const badLines = [];
@@ -119,19 +119,26 @@ export function convertImage(rows, system, { mc = false, settings = "", thumb, i
     if (bad) badLines.push(y);
   }
   const hdr = [0x56, 0x32, 0x49, V2I_VERSION, g.cols, g.rows, g.col0, g.row0];
-  for (const v of [...packed.map((d) => d.length), 0x2000 + 320 * g.row0, 40 * g.row0, badLines.length, Math.min(wrong, 0xffff)]) hdr.push(...le16(v));
+  for (const v of [...streams.map((d) => d.length), 0x2000 + 320 * g.row0, 40 * g.row0, badLines.length, Math.min(wrong, 0xffff)]) hdr.push(...le16(v));
   hdr.push(timing.SYSTEM_ID[timing.STANDARD], V2I_META | V2I_THUMB | (mc ? V2I_MC : 0));
   if (mc) {
     const cram = rleZero(col);
-    packed.push([conv.bg, ...le16(cram.length), ...cram]);
+    streams.push([conv.bg, ...le16(cram.length), ...cram]);
   }
+  return { hdr, streams, w, h, rendered: out, wrong, badLines, topSlot, mc };
+}
+
+/** The .v2i (Uint8Array, with its load address) of a convertImage result. settings:
+ * img2c64's text; thumb: thumbnail bytes; imageName: the "image" line. Throws if it does
+ * not fit the players' buffer. */
+export function pack(res, { settings = "", thumb, imageName = "picture.png", date } = {}) {
   const meta = metadata(settings, imageName, false, date);
-  hdr.push(...thumb, ...le16(meta.length), ...meta);
-  const size = hdr.length + packed.reduce((n, d) => n + d.length, 0);
-  if (size > 0x9800 - PLAYER_BUF) throw new Error(`.v2i too big for the players' buffer (${size} bytes)`);
+  const head = [...res.hdr, ...thumb, ...le16(meta.length), ...meta];
+  const size = head.length + res.streams.reduce((n, d) => n + d.length, 0);
+  if (size > 0x9800 - PLAYER_BUF) throw new Error(`the picture needs ${size} bytes, more than the players' buffer holds; try a smaller picture`);
   const v2i = new Uint8Array(2 + size);
   v2i.set(le16(V2I_LOAD), 0);
   let o = 2;
-  for (const part of [hdr, ...packed]) { v2i.set(part, o); o += part.length; }
-  return { v2i, w, h, rendered: out, wrong, badLines, size, topSlot, mc, geom: g };
+  for (const part of [head, ...res.streams]) { v2i.set(part, o); o += part.length; }
+  return v2i;
 }

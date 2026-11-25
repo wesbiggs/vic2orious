@@ -2,7 +2,7 @@
 // metadata's date taken from the Python's file.
 //   node web/test/v2i_golden.mjs ref.json...
 import { readFileSync } from "node:fs";
-import { convertImage } from "../js/v2i.js";
+import { convertImage, pack } from "../js/v2i.js";
 
 let bad = 0;
 for (const file of process.argv.slice(2)) {
@@ -11,8 +11,8 @@ for (const file of process.argv.slice(2)) {
   const m = want.toString("latin1").match(/date: (\d+)-(\d+)-(\d+) (\d+):(\d+) UTC/);
   const date = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]));
   const t = Date.now();
-  const r = convertImage(ref.img, ref.std, { mc: ref.mc, settings: ref.settings, thumb: [...Buffer.from(ref.thumb, "hex")], imageName: ref.image, date });
-  const got = Buffer.from(r.v2i);
+  const r = convertImage(ref.img, ref.std, { mc: ref.mc });
+  const got = Buffer.from(pack(r, { settings: ref.settings, thumb: [...Buffer.from(ref.thumb, "hex")], imageName: ref.image, date }));
   const diffs = [];
   if (!got.equals(want)) {
     let i = 0;

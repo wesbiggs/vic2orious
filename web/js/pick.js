@@ -20,10 +20,9 @@ export const CANDIDATES = [["none", "none", null], ["fs", "fs", null], ["fs:0.75
   ["atkinson:0.75", "atkinson:0.75", null], ["hybrid", "hybrid", 8],
   ["hybrid,l=6", "hybrid", 6], ["hybrid,l=none", "hybrid", null]];
 
-let standard = null;
 function useStandard(system) {
   system = system || "pal";
-  if (system !== standard) { timing.setStandard(system); resetCaches(); standard = system; }
+  if (system !== timing.STANDARD) { timing.setStandard(system); resetCaches(); }
 }
 
 /** Rows of palette indices as an RGB image in pal. */
@@ -211,22 +210,29 @@ export function rank(results, weights = WEIGHTS) {
 
 // ---------------------------------------------------------------- img2c64's picker
 
+/** The picture at the C64 picture's size, to score against; img may already be that (a
+ * worker gets the picture resized once, not the photo). */
+export function refImage(img, w, h) {
+  return img.width === w && img.height === h ? img : resize(img, w, h, "lanczos");
+}
+
 /** img2c64 judge: the scores of out (a convert result) against picture img, as the screen
  * shows it; quick: by the estimate. Also returns what the C64 shows (rows). */
 export function judge(img, out, system, view, mc, quick, progress = null) {
   let c64, wrong = null, rows = null;
   if (mc) c64 = scaleUp(toImage(out.rows, screenPal(system, view)), 2, 1);
   else [c64, wrong, rows] = (quick ? estimate : shown)(out.rows, system, view, progress);
-  const r = scores(c64, resize(img, c64.width, c64.height, "lanczos"));
+  const r = scores(c64, refImage(img, c64.width, c64.height));
   return Object.assign(r, { wrong, pixels: out.width * out.height, rows });
 }
 
-/** img2c64 candidate: one dither tried; [result, out]. opts as img2c64.convert's. */
-export function candidate(img, system, [name, dither, runs], opts, quick) {
+/** img2c64 candidate: one dither tried; [result, out]. opts as img2c64.convert's; ref:
+ * the picture to score against (img2c64 judge's img). */
+export function candidate(img, system, [name, dither, runs], opts, quick, ref = img) {
   const t0 = performance.now();
   opts = Object.assign({ view: img2c64.VIEW, mc: false }, opts);
   const out = img2c64.convert(img, system, img2c64.parseDither(dither), Object.assign({}, opts, { runs }));
-  const r = judge(img, out, system, opts.view, opts.mc, quick);
+  const r = judge(ref, out, system, opts.view, opts.mc, quick);
   return [Object.assign(r, { setting: name, dither, runs, secs: (performance.now() - t0) / 1000 }), out];
 }
 

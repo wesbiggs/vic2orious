@@ -178,9 +178,10 @@ export function parseDither(v) {
 /** img2c64 convert: {width, height, idx (Uint8Array of palette indices), rows}. mc: wide
  * pixels, one index each. */
 export function convert(img, system, dither, { frame = false, box = [MAX_W, MAX_H], chroma = 1.0,
-  runs = HYBRID_RUNS, view = VIEW, mc = false } = {}) {
+  runs = HYBRID_RUNS, view = VIEW, mc = false, fitted = false } = {}) {
   if (mc && dither[0] === "hybrid") throw new Error("hybrid dithers hires cells; not with multicolour");
-  const [tw, th] = targetSize(img.width, img.height, system, frame, box, mc);
+  // fitted: img is targetSize already (the photo resized once for every dither)
+  const [tw, th] = fitted ? [img.width, img.height] : targetSize(img.width, img.height, system, frame, box, mc);
   if (tw !== img.width || th !== img.height) img = resize(img, tw, th, "lanczos");
   const [mode, k] = dither;
   const pal = palette(system, chroma, view);
