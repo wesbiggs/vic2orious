@@ -486,7 +486,9 @@ class Converter:
                 return (cfg, first_cfg, last_use, rows), None, None
             except SchedFail as e:
                 sch.restore(snap)
-                return None, owner.get(e.task.id), set(owner.values())
+                # sorted: min() below breaks ties by order, and a set's order follows
+                # the spans' hashes, which differ between 32- and 64-bit Pythons
+                return None, owner.get(e.task.id), sorted(set(owner.values()))
 
         # an already committed write may no longer fit when the previous lines are
         # rescheduled: then keep them as they are; without the look ahead last
