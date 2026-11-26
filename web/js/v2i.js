@@ -50,21 +50,25 @@ export function metadata(settings, imageName, frame, date = new Date()) {
   return out.slice(0, META_MAX);
 }
 
-/** build.place, for an image without text: centred, unframed. */
-export function place(cols, rows) {
-  return [Math.floor((40 - cols) / 2), Math.floor((25 - rows) / 2)];
+/** build.place, for an image without text, unframed: at [column, row] if given (build
+ * --at; moved in as far as it takes to fit the screen), else centred. */
+export function place(cols, rows, at = null) {
+  if (!at) return [Math.floor((40 - cols) / 2), Math.floor((25 - rows) / 2)];
+  const fit = (v, room) => Math.max(0, Math.min(Math.floor(v) || 0, room));
+  return [fit(at[0], 40 - cols), fit(at[1], 25 - rows)];
 }
 
 const le16 = (v) => [v & 0xff, (v >> 8) & 0xff];
 
 /** Convert rows (palette indices; multicolour: wide pixels) for system, placed as the
- * build places an image without text (centred). The slow part of a .v2i: pack() adds the
- * thumbnail and metadata. Returns {hdr, streams, w, h, rendered, wrong, badLines,
- * topSlot, mc}, all plain data. Throws if the sprite blocks do not fit the bank. */
-export function convertImage(rows, system, { mc = false, progress = null } = {}) {
+ * build places an image without text (at [column, row] if given, else centred). The slow
+ * part of a .v2i: pack() adds the thumbnail and metadata. Returns {hdr, streams, w, h,
+ * at, rendered, wrong, badLines, topSlot, mc}, all plain data (at: where it went). Throws
+ * if the sprite blocks do not fit the bank. */
+export function convertImage(rows, system, { mc = false, at = null, progress = null } = {}) {
   if (timing.STANDARD !== system) { timing.setStandard(system); resetCaches(); }
   const h = rows.length, w = rows[0].length, cw = mc ? 4 : 8;
-  const [col0, row0] = place(w / cw, h / 8);
+  const [col0, row0] = place(w / cw, h / 8, at);
   const conv = new Converter(rows, { frame: false, at: [col0, row0], mc, progress });
   const g = conv.g;
   conv.run();
@@ -125,15 +129,22 @@ export function convertImage(rows, system, { mc = false, progress = null } = {})
     const cram = rleZero(col);
     streams.push([conv.bg, ...le16(cram.length), ...cram]);
   }
-  return { hdr, streams, w, h, rendered: out, wrong, badLines, topSlot, mc };
+  return { hdr, streams, w, h, at: [g.col0, g.row0], rendered: out, wrong, badLines, topSlot, mc };
 }
 
 /** The .v2i (Uint8Array, with its load address) of a convertImage result. settings:
- * img2c64's text; thumb: thumbnail bytes; imageName: the "image" line. Throws if it does
+ * img2c64's text; thumb: thumbnail bytes; imageName: the "image" line; bare: without the
+ * thumbnail and the metadata (their flags clear), the smallest .v2i. Throws if it does
  * not fit the players' buffer. */
-export function pack(res, { settings = "", thumb, imageName = "picture.png", date } = {}) {
-  const meta = metadata(settings, imageName, false, date);
-  const head = [...res.hdr, ...thumb, ...le16(meta.length), ...meta];
+export function pack(res, { settings = "", thumb, imageName = "picture.png", date, bare = false } = {}) {
+  let head;
+  if (bare) {
+    head = res.hdr.slice();
+    head[25] &= ~(V2I_META | V2I_THUMB);
+  } else {
+    const meta = metadata(settings, imageName, false, date);
+    head = [...res.hdr, ...thumb, ...le16(meta.length), ...meta];
+  }
   const size = head.length + res.streams.reduce((n, d) => n + d.length, 0);
   if (size > 0x9800 - PLAYER_BUF) throw new Error(`the picture needs ${size} bytes, more than the players' buffer holds; try a smaller picture`);
   const v2i = new Uint8Array(2 + size);

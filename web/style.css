@@ -68,6 +68,13 @@ button, .button { cursor: pointer; }
 .chroma { display: flex; flex-direction: column; gap: 4px; font-weight: 600; }
 .chroma output { font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
 .chroma small { font-weight: 400; color: var(--muted); }
+.advanced { flex-basis: 100%; margin: 0; }
+.advanced-body { display: flex; flex-wrap: wrap; gap: 12px 32px; align-items: flex-start; margin-top: 12px; }
+.advanced .pair { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.advanced input[type="number"] { width: 5em; font: inherit; padding: 4px 6px; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--panel); color: var(--fg); }
+.advanced .check { display: block; max-width: 22em; }
+.advanced .check small { margin-left: 1.6em; }
 
 .work { margin: 24px 0 0; }
 .status { margin: 0 0 8px; }

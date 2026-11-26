@@ -37,9 +37,9 @@ export function candidate({ system, fitted, ref, cand, mc = false, box, chroma =
 }
 
 /** Whether the converter's upper left placement (the picker's) is where the .v2i puts the
- * picture (centred), so one conversion serves both. */
-export function sameAsCentred(w, h, mc) {
-  const [c, r] = place(w / (mc ? 4 : 8), h / 8);
+ * picture (at, else centred), so one conversion serves both. */
+export function samePlace(w, h, mc, at = null) {
+  const [c, r] = place(w / (mc ? 4 : 8), h / 8, at);
   return c === 0 && r === 0;
 }
 
@@ -47,15 +47,15 @@ const rowsOf = (idx, w, h) => img2c64.toRows(idx instanceof Uint8Array ? idx : U
 
 /** A candidate through the converter, scored. Where the placements agree it is converted
  * as the .v2i needs it, and the conversion comes back too (conv). */
-export function refine({ system, idx, w, h, ref, est }, progress) {
+export function refine({ system, idx, w, h, ref, est, at = null }, progress) {
   const rows = rowsOf(idx, w, h);
-  if (!sameAsCentred(w, h, false)) {
+  if (!samePlace(w, h, false, at)) {
     const r = pick.refine(ref, { rows, width: w, height: h }, est, system, img2c64.VIEW, progress);
     delete r.rows;
     return { result: r };
   }
   const t0 = performance.now();
-  const conv = convertImage(rows, system, { progress });
+  const conv = convertImage(rows, system, { at, progress });
   const c64 = pick.toImage(conv.rendered, img2c64.VIEW);
   const r = Object.assign(pick.scores(c64, pick.refImage(ref, c64.width, c64.height)),
     { wrong: conv.wrong, pixels: w * h, setting: est.setting, dither: est.dither, runs: est.runs,
@@ -64,6 +64,6 @@ export function refine({ system, idx, w, h, ref, est }, progress) {
 }
 
 /** The picked dither converted for the .v2i. */
-export function convert({ system, idx, w, h, mc = false }, progress) {
-  return convertImage(rowsOf(idx, w, h), system, { mc, progress });
+export function convert({ system, idx, w, h, mc = false, at = null }, progress) {
+  return convertImage(rowsOf(idx, w, h), system, { mc, at, progress });
 }

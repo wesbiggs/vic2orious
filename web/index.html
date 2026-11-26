@@ -49,10 +49,37 @@
           <option value="hybrid" data-hires>Hybrid (hires only)</option>
         </select>
       </label>
-      <label class="chroma">Colour matching <output id="chroma-value">1.00</output>
-        <input type="range" name="chroma" min="0.5" max="1.5" step="0.05" value="1">
-        <small>Lower uses more colour, higher more greys</small>
-      </label>
+      <details id="advanced" class="advanced">
+        <summary>Advanced settings</summary>
+        <div class="advanced-body">
+          <label class="chroma">Colour matching <output id="chroma-value">1.00</output>
+            <input type="range" name="chroma" min="0.5" max="1.5" step="0.05" value="1">
+            <small>Lower uses more colour, higher more greys</small>
+          </label>
+          <fieldset>
+            <legend>Largest size</legend>
+            <span class="pair">
+              <label>Width <input type="number" name="maxw" min="8" max="320" step="8" value="320"></label>
+              <label>Height <input type="number" name="maxh" min="8" max="200" step="8" value="200"></label>
+            </span>
+            <small>Screen pixels, in steps of 8. The picture keeps its shape inside them.</small>
+          </fieldset>
+          <fieldset>
+            <legend>Screen position</legend>
+            <label><input type="radio" name="place" value="centre" checked> Centred</label>
+            <span class="pair">
+              <label><input type="radio" name="place" value="at"> At column</label>
+              <input type="number" name="col" min="0" max="39" value="0" aria-label="Column">
+              <label for="row">row</label>
+              <input type="number" id="row" name="row" min="0" max="24" value="0">
+            </span>
+            <small>In 8×8 cells from the top left. A picture that would run off the screen
+              moves in until it fits.</small>
+          </fieldset>
+          <label class="check"><input type="checkbox" name="bare"> Leave out the thumbnail and metadata
+            <small>The smallest .v2i, for a game or a demo that only shows the picture</small></label>
+        </div>
+      </details>
       <button id="again" type="submit" hidden>Convert again</button>
     </form>
   </section>
@@ -100,8 +127,8 @@
       <div class="every-bar">
         <span class="seg" id="every-view" role="group" aria-label="Show">
           <button type="button" data-view="quantised" aria-pressed="true">Dithered</button>
-          <button type="button" data-view="estimate" aria-pressed="false">C64 estimate</button>
-          <button type="button" data-view="original" aria-pressed="false">Original</button>
+          <button type="button" data-view="estimate" aria-pressed="false"
+            title="In hires, the quick estimate the scores start from">Estimate</button>
         </span>
       </div>
       <div id="grid" class="grid"></div>

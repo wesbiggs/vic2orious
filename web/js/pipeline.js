@@ -1,11 +1,12 @@
 // A picture to a dual PRG, as `python3 -m vic2.prg PICTURE` makes it: img2c64 picks a
-// dither per system (or takes the one given), the pick is converted centred and packed as
-// a .v2i, and both .v2i go into the v2i demo. The work runs through run(type, payload,
-// onProgress), which hands it to web workers on a page (jobs.js) or calls jobs.js in tests.
+// dither per system (or takes the one given), the pick is converted centred (or at a
+// position, as `vic2.build --at` places it) and packed as a .v2i, and both .v2i go into
+// the v2i demo. The work runs through run(type, payload, onProgress), which hands it to
+// web workers on a page (jobs.js) or calls jobs.js in tests.
 
 import * as img2c64 from "./img2c64.js";
 import * as pick from "./pick.js";
-import { SYSTEMS, sameAsCentred } from "./jobs.js";
+import { SYSTEMS, samePlace } from "./jobs.js";
 import { pack } from "./v2i.js";
 import { dualPrg } from "./prg.js";
 
@@ -23,15 +24,19 @@ export function fixedCandidate(dither) {
 /**
  * img: the photo ({width, height, data} RGB). source: its file name. Options: mc
  * (multicolour), dither (null: pick), chroma (img2c64 -c), weights (img2c64 -w, for the
- * pick), run (see above), status(text, fraction) for
- * progress, date for the metadata, by for its "quantized by".
+ * pick), box (img2c64 -s: the largest [width, height]), at ([column, row] on the screen,
+ * vic2.build --at; null: centred), bare (.v2i without thumbnail and metadata), run (see
+ * above), status(text, fraction) for progress, date for the metadata, by for its
+ * "quantized by".
  * Returns {prg, name, source, opts, systems: {pal, ntsc}}; each system has v2i, rendered
- * (rows of palette indices as the C64 shows them), w, h, mc, wrong, setting (the dither),
+ * (rows of palette indices as the C64 shows them), w, h, at (where the picture went, in
+ * cells), mc, wrong, setting (the dither),
  * pick (the picker's choice), ranked (the picker's results, best first; null with a given
  * dither), candidates (every dither tried) and convs (conversions by setting).
  */
-export async function makePrg(img, source, { mc = false, dither = null, chroma = 1.0, weights = pick.WEIGHTS, run, status = () => {}, date = new Date(), by = "vic2orious web" } = {}) {
-  const box = [img2c64.MAX_W, img2c64.MAX_H];
+export async function makePrg(img, source, { mc = false, dither = null, chroma = 1.0, weights = pick.WEIGHTS,
+  box = [img2c64.MAX_W, img2c64.MAX_H], at = null, bare = false, run, status = () => {}, date = new Date(),
+  by = "vic2orious web" } = {}) {
   const name = source.replace(/^.*[\\/]/, "").replace(/\.[^.]*$/, "") || "picture";
   // progress: each light job counts 1, each conversion HEAVY, as they finish (or move)
   const HEAVY = 30;
@@ -74,7 +79,7 @@ export async function makePrg(img, source, { mc = false, dither = null, chroma =
     if (top) {
       const conv = await Promise.all(ranked.slice(0, top).map((est) => {
         const o = outs.get(est.setting);
-        return job("refine", { system, idx: o.idx, w: o.w, h: o.h, ref: prep[system].ref, est }, HEAVY);
+        return job("refine", { system, idx: o.idx, w: o.w, h: o.h, ref: prep[system].ref, est, at }, HEAVY);
       }));
       for (const c of conv) if (c.conv) convs.set(c.result.setting, c.conv);
       const extra = ranked.slice(top).map((r) => Object.assign({}, r, { estimate: true }));
@@ -86,15 +91,15 @@ export async function makePrg(img, source, { mc = false, dither = null, chroma =
     const reuse = convs.get(best.setting);
     if (reuse) total -= HEAVY;           // the picker's conversion serves
     report(stage);
-    const conv = reuse || await job("convert", { system, idx: o.idx, w: o.w, h: o.h, mc }, HEAVY);
+    const conv = reuse || await job("convert", { system, idx: o.idx, w: o.w, h: o.h, mc, at }, HEAVY);
     const picked = auto ? pick.pickedText(ranked, cands.length, top, weights, by) : null;
     const settings = img2c64.settings(source.replace(/^.*[\\/]/, ""), system, img2c64.parseDither(best.dither),
       { box, chroma, runs: best.runs, picked, mc, by });
-    const v2i = pack(conv, { settings, thumb: prep[system].thumb, imageName: name + SUFFIX[system] + ".png", date });
+    const v2i = pack(conv, { settings, thumb: prep[system].thumb, imageName: name + SUFFIX[system] + ".png", date, bare });
     systems[system] = {
-      v2i, rendered: conv.rendered, w: conv.w, h: conv.h, mc, wrong: conv.wrong,
+      v2i, rendered: conv.rendered, w: conv.w, h: conv.h, at: conv.at, mc, wrong: conv.wrong,
       setting: best.setting, pick: auto ? best.setting : null, ranked, settings,
-      sameAsCentred: sameAsCentred(conv.w, conv.h, mc), thumb: prep[system].thumb,
+      samePlace: samePlace(conv.w, conv.h, mc, at), thumb: prep[system].thumb,
       // every dither tried, by the estimate: its indices (w x h) and figures
       candidates: res.map((r) => Object.assign({}, r.result, { idx: r.idx, w: r.w, h: r.h })),
       convs: new Map([[best.setting, conv]]),
@@ -102,7 +107,7 @@ export async function makePrg(img, source, { mc = false, dither = null, chroma =
   }));
   status("Packing the PRG", 1);
   const prg = dualPrg(systems.pal.v2i, systems.ntsc.v2i);
-  return { prg, name, source, opts: { mc, chroma, box, by }, systems };
+  return { prg, name, source, opts: { mc, chroma, box, at, bare, by }, systems };
 }
 
 /**
@@ -112,7 +117,7 @@ export async function makePrg(img, source, { mc = false, dither = null, chroma =
  * figures stay. Options: run, status, date as makePrg's.
  */
 export async function withDither(prev, setting, { run, status = () => {}, date = new Date() } = {}) {
-  const { mc, chroma, box, by } = prev.opts;
+  const { mc, chroma, box, at, bare, by } = prev.opts;
   const progress = { pal: 0, ntsc: 0 };
   const report = () => status(`Converting with ${setting}`, (progress.pal + progress.ntsc) / 2);
   const systems = {};
@@ -123,17 +128,17 @@ export async function withDither(prev, setting, { run, status = () => {}, date =
     if (!o) throw new Error(`${setting}: not one of the dithers tried`);
     let conv = p.convs.get(setting);
     if (!conv) {
-      conv = await run("convert", { system, idx: o.idx, w: o.w, h: o.h, mc }, (f) => { progress[system] = f; report(); });
+      conv = await run("convert", { system, idx: o.idx, w: o.w, h: o.h, mc, at }, (f) => { progress[system] = f; report(); });
       p.convs.set(setting, conv);
     }
     progress[system] = 1;
     report();
     const settings = img2c64.settings(prev.source.replace(/^.*[\\/]/, ""), system, img2c64.parseDither(o.dither),
       { box, chroma, runs: o.runs, picked: null, mc, by });
-    const v2i = pack(conv, { settings, thumb: p.thumb, imageName: prev.name + SUFFIX[system] + ".png", date });
+    const v2i = pack(conv, { settings, thumb: p.thumb, imageName: prev.name + SUFFIX[system] + ".png", date, bare });
     systems[system] = Object.assign({}, p, {
-      v2i, rendered: conv.rendered, w: conv.w, h: conv.h, wrong: conv.wrong, setting, settings,
-      sameAsCentred: sameAsCentred(conv.w, conv.h, mc), screen: undefined,
+      v2i, rendered: conv.rendered, w: conv.w, h: conv.h, at: conv.at, wrong: conv.wrong, setting, settings,
+      samePlace: samePlace(conv.w, conv.h, mc, at), screen: undefined,
     });
   }));
   status("Packing the PRG", 1);

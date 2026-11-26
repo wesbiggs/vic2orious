@@ -14,7 +14,7 @@ const MAX_PIXELS = 16_000_000;      // larger photos are scaled down first (canv
 let pool = null, busy = false, last = null, file = null, result = null, shownSystem = "pal";
 let original = null;                // the picture last decoded (a canvas)
 let split = 0;                      // how much of the screen, from the left, the curtain covers
-let everyView = "quantised";        // what the cards show: quantised, estimate or original
+let everyView = "quantised";        // what the cards show: quantised or estimate
 let using = null;                   // {setting, fraction}: a dither being converted by Use this
 const urls = [];
 
@@ -77,10 +77,18 @@ function weights() {
   return w[0] + w[1] + w[2] > 0 ? w : WEIGHTS.slice();
 }
 
+/** A whole number from a field, within lo..hi (step: rounded down to it); def if empty. */
+function field(input, lo, hi, def, step = 1) {
+  const v = Math.floor(+input.value / step) * step;
+  return input.value === "" || !Number.isFinite(v) ? def : Math.max(lo, Math.min(hi, v));
+}
+
 function options() {
   const form = $("options");
+  const box = [field(form.maxw, 8, 320, 320, 8), field(form.maxh, 8, 200, 200, 8)];
+  const at = form.place.value === "at" ? [field(form.col, 0, 39, 0), field(form.row, 0, 24, 0)] : null;
   return { mc: form.mode.value === "mc", dither: form.dither.value || null, chroma: +form.chroma.value,
-    weights: weights() };
+    weights: weights(), box, at, bare: form.bare.checked };
 }
 
 function setStatus(text, fraction, error = false) {
@@ -146,17 +154,21 @@ function show(r, keepSplit = false) {
   const name = fileName(r.name);
   link($("prg"), r.prg, `${name}.prg`);
   $("prg").textContent = `Download ${name}.prg (${Math.ceil(r.prg.length / 1024)} KB)`;
-  link($("v2i-pal"), r.systems.pal.v2i, `${name}-p.v2i`);
-  link($("v2i-ntsc"), r.systems.ntsc.v2i, `${name}-n.v2i`);
+  for (const [s, sfx] of [["pal", "p"], ["ntsc", "n"]]) {
+    const v2i = r.systems[s].v2i;
+    link($(`v2i-${s}`), v2i, `${name}-${sfx}.v2i`);
+    $(`v2i-${s}`).textContent = `${s.toUpperCase()} .v2i (${(v2i.length / 1024).toFixed(1)} KB)`;
+  }
   $("result").hidden = false;
   if (!keepSplit) split = 0;
   draw(shownSystem);
 }
 
-/** Where the picture sits on the 320x200 screen (centred, as the .v2i puts it). */
+/** Where the picture sits on the 320x200 screen, as the .v2i puts it. */
 function placement(s) {
   const scale = s.mc ? 2 : 1, wpx = s.w * scale;
-  return { scale, wpx, x: Math.floor((40 - wpx / 8) / 2) * 8, y: Math.floor((25 - s.h / 8) / 2) * 8 };
+  const [col, row] = s.at || [Math.floor((40 - wpx / 8) / 2), Math.floor((25 - s.h / 8) / 2)];
+  return { scale, wpx, x: col * 8, y: row * 8, col, row };
 }
 
 /** Palette indices (rows of them, or flat, w wide) as a canvas in the screen colours the
@@ -178,7 +190,7 @@ function pixels(rows, w, h, scale) {
   return c;
 }
 
-/** The 320x200 screen as the C64 shows it: the picture centred on black. */
+/** The 320x200 screen as the C64 shows it: the picture in its place on black. */
 function screenCanvas(s) {
   const { scale, x, y } = placement(s);
   const c = document.createElement("canvas");
@@ -201,10 +213,11 @@ function draw(system) {
   s.screen ||= screenCanvas(s);
   $("frame").style.setProperty("--ar", String((320 * PAR[system]) / 200));
   setSplit(split);
-  const { wpx } = placement(s);
+  const { wpx, col, row } = placement(s);
   const pct = ((100 * s.wrong) / (s.w * s.h)).toFixed(1);
+  const where = result.opts.at ? ` at column ${col}, row ${row}` : "";
   $("stats").textContent = `${system.toUpperCase()}: ${s.setting} dither, ${wpx}×${s.h} pixels` +
-    `${s.mc ? " (multicolour)" : ""}; ${pct}% of them drawn in a nearby colour.`;
+    `${s.mc ? " (multicolour)" : ""}${where}; ${pct}% of them drawn in a nearby colour.`;
   every();
 }
 
@@ -387,14 +400,9 @@ function card(r, s, wasConverted) {
   c.width = r.w * scale * 2; c.height = r.h * 2;
   c.style.aspectRatio = String((r.w * scale * PAR[shownSystem]) / r.h);
   const ctx = c.getContext("2d");
-  if (everyView === "original" && result.original) {
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(result.original, 0, 0, c.width, c.height);
-  } else {
-    const rows = everyView === "estimate" && r.shownRows ? r.shownRows : r.idx;
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(pixels(rows, r.w, r.h, scale), 0, 0, c.width, c.height);
-  }
+  const rows = everyView === "estimate" && r.shownRows ? r.shownRows : r.idx;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(pixels(rows, r.w, r.h, scale), 0, 0, c.width, c.height);
   const shown = r.setting === s.setting, working = using && using.setting === r.setting;
   const badge = shown ? "showing" : wasConverted && !s.mc ? "converted in full" : null;
   let acts;
@@ -468,6 +476,11 @@ function init() {
   });
   form.addEventListener("submit", (e) => { e.preventDefault(); convert(); });
   form.chroma.addEventListener("input", chromaShown);
+  // a column or row typed in places the picture there
+  for (const f of [form.col, form.row]) f.addEventListener("input", () => { form.place.value = "at"; });
+  const adv = $("advanced");
+  adv.open = recall("vic2orious.advanced") === "open";
+  adv.addEventListener("toggle", () => remember("vic2orious.advanced", adv.open ? "open" : "shut"));
   modeChanged();
   chromaShown();
   window.addEventListener("pageshow", () => { modeChanged(); chromaShown(); });

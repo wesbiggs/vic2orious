@@ -41,7 +41,7 @@ JavaScript's with them:
     python3 web/test/pick_golden.py photo.jpg pick.json [-m] && node web/test/pick_golden.mjs pick.json
     python3 web/test/v2i_golden.py pal pic-p.png v.json && node web/test/v2i_golden.mjs v.json
     python3 -m vic2.prg -o ref.prg photo.jpg && node web/test/prg_e2e.mjs prep.json ref.prg photo.jpg
-        [-m] [-d DITHER] [-c S] [-w R,S,C]   # as given to vic2.prg (-d hybrid,l=6 for -d hybrid -l 6)
+        [-m] [-d DITHER] [-c S] [-w R,S,C] [-s WxH]   # as given to vic2.prg (-d hybrid,l=6 for -d hybrid -l 6)
 
 The last runs the page's pipeline in worker threads and compares the whole PRG (apart
 from the conversion dates in the metadata). The picker's scores match to about the last
@@ -55,9 +55,16 @@ in the last bits, so a near tie between two dithers could in principle go the ot
   default (`img2c64 -d hybrid` without `-l` currently runs with none).
 - The browser decodes the picture: EXIF orientation and colour profiles are applied as
   the browser does; photos over 16 megapixels are scaled down by the browser first.
-- Options not offered: palette (`-P`, always tools/tv.vpl), size (`-s`). Chroma (`-c`) is
-  the page's "Colour matching", 0.5 to 1.5; weights (`-w`) are under "Every dither, with
-  the figures", which also shows every dither tried (dithered, the estimate, the original)
-  with its scores, ranked again as the weights change.
+- Options not offered: palette (`-P`, always tools/tv.vpl). Under Advanced settings,
+  Colour matching is chroma (`-c`, 0.5 to 1.5) and Largest size is `-s WxH`; weights
+  (`-w`) are under Compare the dithers, which shows every dither tried (dithered or the
+  estimate) with its scores, ranked again as the weights change.
+- Screen position (Advanced settings) places the picture as `vic2.build --at COLUMN,ROW`
+  does, which vic2.prg has no option for; a position that would run off the screen moves
+  in until the picture fits (the build would stop instead). `web/test/prg_e2e.mjs --at`
+  checks it against `web/test/prg_at.py COLUMN,ROW`, vic2.prg with its conversions
+  placed that way.
+- "Leave out the thumbnail and metadata" writes .v2i files with flags bits 0 and 2 clear
+  (docs/v2i-format.md), which the players and v2i.inc read; the build always writes both.
 - "Use this" under Compare the dithers converts that dither for both systems as `vic2.prg -d` does (from the candidates already made); `hybrid,l=6` and
   `hybrid,l=none` there are `-d hybrid -l 6` and `-d hybrid -l none`.
