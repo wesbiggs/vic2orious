@@ -1,10 +1,16 @@
-// Port of vic2/thumb.py: a picture shrunk into one sprite's 24x21 pixels, in at most 8
-// colours over a background colour (docs/v2i-format.md, "Thumbnail").
+// Thumbnails (ported from vic2/thumb.py, which now only reads them): a picture shrunk into
+// one sprite's 24x21 pixels, in at most 8 colours over a background colour
+// (docs/v2i-format.md, "Thumbnail").
 
 import { resize, enhanceColor } from "./imaging.js";
 import { pyRound } from "./pyround.js";
 
-export const W = 24, H = 21, SPRITES = 8, BG = 0, SATURATE = 1.5;
+export const W = 24, H = 21, SPRITES = 8, BG = 0;
+// The shrunk picture's saturation is raised this much before its colours are chosen:
+// averaging greys the colours, and the nearest palette colours were browns and greys
+// (Nov 2026, Kodak photos: 1.3-1.6 keep a parrot's green, 2 turns skin green; dithering
+// 24 pixels only added noise).
+export const SATURATE = 1.5;
 
 export function size(w, h) {
   const s = Math.min(W / w, H / h, 1.0);

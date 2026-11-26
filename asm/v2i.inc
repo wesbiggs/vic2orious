@@ -65,7 +65,7 @@ V2I_PAL    = 0                          ; 6569 (and 8565): 63 cycles x 312 lines
 V2I_NTSC   = 1                          ; 6567R8 (and 8562): 65 cycles x 263 lines
 V2I_OTHER  = $ff                        ; anything else (6567R56A, ...): not supported
 
-V2I_IRQ_LINE = 9                        ; raster IRQ line, kernel entry (IRQ_LINE in convert.py)
+V2I_IRQ_LINE = 9                        ; raster IRQ line, kernel entry (IRQ_LINE in web/js/convert.js)
 
 V2I_ERR_FORMAT = 1
 V2I_ERR_SYSTEM = 2

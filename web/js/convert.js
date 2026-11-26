@@ -1,7 +1,8 @@
-// Port of vic2/convert.py: cell colours, sprite spans and the raster kernel for one image.
-// It must give the same result as the Python byte for byte (web/test/golden.mjs). Where
-// the Python's result depends on an order, this follows it: dicts keep insertion order
-// (Map here), sorts are stable, min/max return the first extreme, and tuples compare
+// The converter: cell colours, sprite spans and the raster kernel for one image, for the
+// page and (through tools/engine.mjs) the Python build. Ported from vic2/convert.py, which
+// it replaced byte for byte (`git log -- vic2/convert.py` finds its last version, with the
+// longer comments). Where that result depended on an order, this follows it: dicts keep insertion
+// order (Map here), sorts are stable, min/max return the first extreme, and tuples compare
 // lexicographically (cmpSpan, cmpArr).
 
 import * as timing from "./timing.js";

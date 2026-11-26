@@ -3,7 +3,7 @@
 The default font is derived from the C64 character ROM (lower/upper case set): each glyph is
 trimmed to its non-blank columns and given one spacing column. Other fonts come from GEOS
 font files in Convert (.cvt) format, one point size of them, used as stored. `use` selects
-the font for the whole process (like timing.set_standard); `current` returns it.
+the font for the whole process (like engine.set_standard); `current` returns it.
 """
 
 import os

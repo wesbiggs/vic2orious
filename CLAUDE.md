@@ -12,18 +12,30 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 
 ## Layout
 
-- `vic2/convert.py`: the converter. Picks two bitmap colours per 8x8 cell (local search
+- `web/js/` is the one engine, for the web page (`web/`) and the Python tools alike
+  (ported from the Python engine, which it replaced byte for byte; `git log --
+  vic2/convert.py` finds its last version, with the longer comments). The Python reaches it through `vic2/engine.py`, which runs
+  `node tools/engine.mjs` (JSON request on stdin, JSON lines back: `log`, `result`,
+  `error`; pictures as base64; no npm packages, Node 18 or later, `$NODE`): `convert`
+  (the build's `convert_new`: converter, `.v2i` packing with thumbnail and metadata,
+  `v2i.js` `convertPlaced`/`pack`, plus what `vic2/layers.py` draws) and `img2c64` (fit,
+  dither, the picker in `tools/engine-worker.mjs` worker threads, thumbnail; the log lines
+  are the old Python's). Python keeps decoding pictures (EXIF, ICC, alpha, HEIC), writing
+  the PNGs, the build, texts, fonts, cc65, disks and the VICE checks.
+  `vic2/engine.py` also has what Python still needs of the old modules: `set_standard`,
+  `STANDARD`, `SYSTEM_ID` and a slim `Geometry`.
+- `web/js/convert.js` (was `vic2/convert.py`): the converter. Picks two bitmap colours per 8x8 cell (local search
   per character row, single and neighbour-pair moves, run for each of `ROW_WEIGHTS`; the
   candidate that really schedules with the fewest wrong pixels wins), then for every raster
   line covers the remaining pixels with at most 8 single-colour 24-pixel "spans" (`cover`:
   exact max-pixels DP, memoised) and assigns them to the 8 sprites (DP over sprite subsets,
   minimising register writes). `Geometry` holds size and screen placement. Multicolour
   (`mc=True`, img2c64 `-m` PNGs): see How it works.
-- `vic2/timing.py`: cycle model of the VIC-II bus stealing (badlines, sprite DMA, the 3
+- `web/js/timing.js` (was `vic2/timing.py`): cycle model of the VIC-II bus stealing (badlines, sprite DMA, the 3
   write cycles allowed after BA goes low), the kernel code generator (prologue, sync phase)
-  and the EDF write scheduler with per-line checkpoints. `set_standard("pal"|"ntsc")`
-  switches module globals (`CYCLES`, `LINES`, `SPR_P`, `Y_AFTER`, `FPS`) for the whole
-  process; `build --ntsc` calls it before converting.
+  and the EDF write scheduler with per-line checkpoints. `setStandard("pal"|"ntsc")`
+  switches module globals (`CYCLES`, `LINES`, `SPR_P`, `Y_AFTER`, `FPS`); the CLI calls
+  it per request with the system `engine.set_standard` set (`build --ntsc` sets that).
 - `vic2/build.py`: CLI. Converts images, writes `.v2i`/`.v2t` files, generates
   `images.inc`, `diskshow.inc`, `ask.inc` and `font.inc`, assembles with cl65, makes the
   D64 (or D81), and optionally verifies in VICE, all in one build directory per video
@@ -40,11 +52,11 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   (`demo_txt`/`demo_txt_n`, 0 = none; `DUAL=1` for two) in `build/prg/v2i/`, frame
   from the metadata, `--font` checked against the text's height; `--verify` needs the
   build's `<name>.json` beside each `.v2i` (`model`).
-- `vic2/dither_pick.py`: the dither recommender's metrics (blurred RMS, SSIM of the
+- `web/js/pick.js` (was `vic2/dither_pick.py`): the dither recommender's metrics (blurred RMS, SSIM of the
   luma, a*b* colour error), `rank`, `CANDIDATES`, `shown` (through the converter) and
   `estimate` (img2c64 `-t`: top-2 colours per cell, one exact cover per line as if every
-  span fitted, no timing; ~0.1 s against 10-370 s); img2c64 without `-d` and
-  `analysis/dither_rank.py` use it. Imported only for that (numpy).
+  span fitted, no timing; ~0.1 s against 10-370 s); img2c64 without `-d` uses it
+  (`analysis/dither_rank.py` and most of `analysis/` need the old Python engine and numpy).
 - `vic2/disk.py`: `make pictures` (`python3 -m vic2.disk [--ntsc|--dual] [--viewer]
   [--disk K] [-o FILE] [FILE.v2i...]`): the build directory's `.v2i` files (not
   `*-centred`, not older versions or the other system's) with `thumbs.prg` (and
@@ -53,12 +65,12 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   shared when the same). Needs a build first for the programs.
 - `vic2/info.py`: `python3 -m vic2.info [-t DIR] FILE.v2i...` prints a `.v2i`'s header,
   thumbnail and metadata (`build.read_v2i`; `-t` writes the thumbnails as PNGs).
-- `vic2/thumb.py`: thumbnails (Nov 2026): the picture as the C64 shows it, box-shrunk into
+- `web/js/thumb.js` (making them; `vic2/thumb.py` reads, checks and draws them): thumbnails (Nov 2026): the picture as the C64 shows it, box-shrunk into
   24x21 (24x15 for 320x200), saturation x1.5 (`SATURATE`; averaging greys colours),
   black plus at most 8 colours (`choose`: backward elimination from 16 by error), one
   sprite per colour, all at one position, so 8 overlaid sprites show it exactly. img2c64
   makes it from the source picture (`thumbnail`, PNG `tEXt` `vic2orious-thumb`, hex);
-  `build.v2i_thumbnail` takes that, else makes one from the PNG, and writes `build/<system>/<name>_thumb.png`. Tried: F-S
+  the build takes that, else makes one from the PNG, and writes `build/<system>/<name>_thumb.png`. Tried: F-S
   dither (noise at this size), Lanczos (no better than box).
 - `vic2/layers.py`: `build/<system>/<name>_sprites.png`, written with `_compare.png` on
   every new conversion (not from the cache: `--force` for old ones): bitmap alone, sprite
@@ -69,7 +81,7 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
 - `vic2/font.py`: proportional fonts as GEOS point-size records: the default derived from
   the ROM lower/upper case set, or one size of a GEOS `.cvt` font (`build --font`); the
   ASCII text codes and the pixel-width word wrap. `font.use()` selects the font for the
-  whole process (like `timing.set_standard`), `font.current()` returns it.
+  whole process (like `engine.set_standard`), `font.current()` returns it.
 - `vic2/palette.py`: Pepto palette, and Colodore (`.vpl`, and as VICE renders it with
   its default colour controls, PAL and NTSC: `COLODORE_VICE_*`, measured from a colour
   bar PRG), and the user's TV (`TV_2026_11`, `tools/tv.vpl`, img2c64's default, plus the
@@ -106,15 +118,15 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   multiples of 8) and rounds to multiples of 8. `-o FILE` or `-o DIR/` (keeps input names, takes several files / glob
   patterns), `-d floydsteinberg|none` (Pillow's) or `fs:K|atkinson[:K]|hybrid[:E]`;
   without `-d` it picks one per picture and system (`candidate`/`pick`, all candidates of
-  all pictures in one process pool): `vic2/dither_pick.py`'s `CANDIDATES` through the
+  all pictures at once in worker threads): `web/js/pick.js`'s `CANDIDATES` through the
   converter, ranked by blurred SSIM and a*b* colour error (`-w R,S,C`, default `0,1,1`;
-  needs numpy), recorded as `dither choice` in the settings; `-t N` (default 3, `all`)
-  ranks them all by `dither_pick.estimate` first and converts only the best N, then ranks
+  recorded as `dither choice` in the settings; `-t N` (default 3, `all`)
+  ranks them all by `pick.estimate` first and converts only the best N, then ranks
   those with the others' estimates (`rank` scales each metric over the set it gets, so
   ranking the N alone flipped a near tie; Nov 2026, kodim05/13 at 160x96: same picks as
   `-t all`, a third of the CPU); the log prints every candidate's metrics, wrong
   pixels and CPU time
-  (`diffuse`: own serpentine error diffusion, pure Python; hybrid picks each cell's pair
+  (`img2c64.js` `diffuse`: own serpentine error diffusion; hybrid picks each cell's pair
   with `cell_pairs`, segment distance plus a spread penalty as in Yliluoma, and leaves the
   pair only beyond RGB distance E), `-c S` (colours are chosen against `palette(system,
   S)`, the palette moved towards its luma, then written with the real ones; helps hybrid,
@@ -124,7 +136,7 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   (Nov 2026; far paler than VICE's Colodore, nearest stock VICE palette
   community-colors), `-P none` for VICE's Colodore; the library functions default to
   none, so `analysis/` scripts still use Colodore; the dither picker scores what that
-  screen shows, `dither_pick.shown(.., view)`; the build reads the PNGs through
+  screen shows, `pick.shown(.., view)`; the build reads the PNGs through
   `palette.KNOWN`, which has `TV_2026_11` (= tools/tv.vpl) and the current
   `tools/tv.vpl` if it was measured again: keep old palettes there, or their PNGs map to
   the nearest Pepto colours), `-l N|none` (hybrid: a line's colours outside the cell pairs fit in N
@@ -138,7 +150,7 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   (`TEXT_KEY`), which the build copies into the `.v2i` metadata. Refuses to overwrite its input. `-b` only leaves
   room for the frame `v2i_frame` draws (`build -b`): fits 304x184. (Its old `-b` drew the
   frame into the pixels, which did not always convert exactly.) Every output PNG also
-  gets a thumbnail (`vic2/thumb.py`, text chunk `vic2orious-thumb`).
+  gets a thumbnail (`web/js/thumb.js`, text chunk `vic2orious-thumb`).
 - `analysis/`: one-off measurements, not part of the build (`compare.py`: v2i vs AFLI and
   NUFLI; `spantypes.py`: X-expanded/multicolour spans; `timingloss.py`: wrong pixels by
   cause; `badline_weight.py`: the `RETASK` badline weight; `dither_score.py`: img2c64
@@ -216,7 +228,7 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   entry times ("hypotheses") and emits RMW/store instructions that land on the start of BA
   low periods until all hypotheses merge. Keep the IRQ prologue in `v2i.inc`
   (`sta/stx/sty zp`, `jsr v2i_kjump`, `nop`, `jmp` whose operand is `v2i_kvec`: 5 cycles, as the `jmp (v2i_kvec)` it replaced, which broke when the vector landed at $xxff) as is; the entry window assumed in
-  `convert.py` (`T(IRQ_LINE, 20..47)`) depends on it. It covers any interrupted instruction
+  `convert.js` (`T(IRQ_LINE, 20..47)`) depends on it. It covers any interrupted instruction
   (the `ask` verify build draws text continuously and still matches).
 - All 8 sprites run continuously in 21-line blocks with staggered phases (`SPR_START`), so
   every kernel line has the same sprite DMA. Pointer writes must land on the line before a
@@ -340,14 +352,14 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   of grouped targets.
 - Conversion cache: `build/pal/<name>.json` (`build/ntsc/` for NTSC) holds the converter result (stats, geometry, path
   of `_expected.png`) and a key hashing the png, frame/at, the video system,
-  `CACHE_VERSION` and `CACHE_SOURCES` (convert, timing, palette, thumb, `__init__` for the version). Builds reuse it;
+  `CACHE_VERSION` and `CACHE_SOURCES` (every `web/js/*.js`, `tools/engine.mjs`, and `vic2/` palette, thumb, engine). Builds reuse it;
   `--force` reconverts. build.py itself is not hashed: bump `CACHE_VERSION` when changing
   how `.v2i` is packed. Texts are not cached: `convert_image` packs the `.txt` into a `.v2t` again on
   every run (milliseconds), so editing a story, `--font` or `--leading` never reconverts
   the image. The Makefile converts each image in its own
   `--convert-only` run (target `build/<system>/<name>.json`, so `make -j` parallelises), then runs
   the full build, which finds everything cached.
-- After touching `timing.py`, `convert.py`, `v2i.inc` or `v2t.inc`, run `--verify`: every check
+- After touching `timing.js`, `convert.js`, `v2i.js`, `v2i.inc` or `v2t.inc`, run `--verify`: every check
   must report `0 differing pixels` (VICE output vs the model). The converter itself reports
   bad lines / wrong pixels vs the source; those are expected to be non-zero.
 - `.v2i` version 6 (Nov 2026; version 5 was bank 3 only): header, thumbnail (flags bit 2, `V2I_THUMB`), metadata
@@ -355,15 +367,15 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   thumbnail and metadata alone. Versions 3/4 had the metadata at the end and no
   thumbnail; `v2i_show` (through `v2i_info`) takes only version 6, `read_v2i` all. Version 6: destinations
   are bank-relative and the kernel stream starts with a relocation table (count, then offsets of
-  the sprite pointers' high bytes; `timing.pointer_hi_offsets`), relocated per bank by `v2i_show`.
+  the sprite pointers' high bytes; `timing.js` `pointerHiOffsets`), relocated per bank by `v2i_show`.
   `build --bank N` sets `V2I_BANK` for the programs (bank 2 has 48 sprite blocks, see `docs/v2i-lib.md`).
   Metadata: `quantized by` (img2c64's line, `img2c64@VERSION`; old PNGs' `quantiser`
-  is renamed; else `unknown`), `generated by: vic2orious@VERSION` (`vic2/__init__.py`
-  `VERSION`, img2c64 imports it too), `date` (UTC, at conversion), img2c64's other PNG
+  is renamed; else `unknown`), `generated by: vic2orious@VERSION` (`web/js/version.js`
+  `VERSION`, which `vic2/__init__.py` reads), `date` (UTC, at conversion), img2c64's other PNG
   `tEXt` lines, then the build's `image`, `palette` (if img2c64 named none;
   `palette_name`), `frame`. Both are written at conversion, so
   they are cached with the `.v2i` (the key hashes the PNG, which holds img2c64's text and
-  thumbnail, and `thumb.py`). Settings not in the format go there.
+  thumbnail, and `web/js`). Settings not in the format go there.
 - `--verify` builds one single-image slideshow per image, with its text, and compares the
   whole screen with a model (`expected_screen`: converter output + `Screen` text model).
   For each `.ask` it builds `ask.s` with `AUTO=n` (picks the last topic, then keeps
@@ -376,7 +388,7 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   changes, change `vic2/screen.py` to match.
 - Keys in the demo and space in the viewer are read from the CIA matrix, so VICE
   `-keybuf` cannot press them (it only feeds the KERNAL buffer).
-- Requires Python 3 with Pillow, cc65 (`cl65`), VICE (`x64sc`, `c1541`). The character
+- Requires Python 3 with Pillow, Node 18 or later (the engine), cc65 (`cl65`), VICE (`x64sc`, `c1541`). The character
   ROM is read from `$VICE_DATA`, else the first of Homebrew's and the usual Linux VICE data
   directories that has it (`font.vice_file`, `VICE_DIRS`).
 - CI (`.github/workflows/ci.yml`, on pushes to main, pull requests and manually): Ubuntu with apt's

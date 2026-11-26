@@ -1,7 +1,7 @@
-// The parts of Pillow (12.3) that tools/img2c64.py and vic2/thumb.py use, ported so the
-// browser makes the same pixels: resize (Resample.c, 8 bits per channel), RGB -> L and
-// blend (Convert.c, Blend.c: ImageEnhance.Color), quantize to a given palette without or
-// with Floyd-Steinberg (Convert.c topalette, Palette.c's colour cache), BoxBlur.
+// The parts of Pillow (13.0) that img2c64 and the thumbnails use, ported so the page and
+// the Python tools make the pixels Pillow would: resize (Resample.c, 8 bits per channel),
+// RGB -> L and blend (Convert.c, Blend.c: ImageEnhance.Color), quantize to a given palette
+// without or with Floyd-Steinberg (Convert.c topalette, Palette.c's colour cache), BoxBlur.
 //
 // An image is {width, height, data}: data a Uint8ClampedArray or Uint8Array of RGB
 // triples, row by row.
@@ -85,44 +85,29 @@ const clip8 = (ss) => {
   return v < 0 ? 0 : v > 255 ? 255 : v;
 };
 
-/** Image.resize(size, filter) for an RGB image; filter "lanczos" or "box". */
-export function resize(im, width, height, filterName = "lanczos") {
-  if (width === im.width && height === im.height) {
-    return { width, height, data: im.data.slice() };
-  }
-  const filter = FILTERS[filterName];
-  const needH = width !== im.width;
-  const needV = height !== im.height;
-  const vert = precomputeCoeffs(im.height, 0, im.height, height, filter);
-  const yFirst = vert.bounds[0];
-  const yLast = vert.bounds[height * 2 - 2] + vert.bounds[height * 2 - 1];
-  let src = im;
-  if (needH) {
-    const hor = precomputeCoeffs(im.width, 0, im.width, width, filter);
-    for (let i = 0; i < height; i++) vert.bounds[i * 2] -= yFirst;
-    const tmp = newImage(width, yLast - yFirst);
-    const { ksize, kk, bounds } = hor;
-    const sd = im.data, td = tmp.data;
-    for (let yy = 0; yy < tmp.height; yy++) {
-      const row = (yy + yFirst) * im.width * 3;
-      for (let xx = 0; xx < width; xx++) {
-        const xmin = bounds[xx * 2], xmax = bounds[xx * 2 + 1];
-        const ko = xx * ksize;
-        let s0 = 1 << (PRECISION_BITS - 1), s1 = s0, s2 = s0;
-        for (let x = 0; x < xmax; x++) {
-          const w = kk[ko + x], p = row + (x + xmin) * 3;
-          s0 += sd[p] * w; s1 += sd[p + 1] * w; s2 += sd[p + 2] * w;
-        }
-        const o = (yy * width + xx) * 3;
-        td[o] = clip8(s0); td[o + 1] = clip8(s1); td[o + 2] = clip8(s2);
+function horizontalPass(im, { ksize, kk, bounds }, width, y0, rows) {
+  const out = newImage(width, rows);
+  const sd = im.data, td = out.data;
+  for (let yy = 0; yy < rows; yy++) {
+    const row = (yy + y0) * im.width * 3;
+    for (let xx = 0; xx < width; xx++) {
+      const xmin = bounds[xx * 2], xmax = bounds[xx * 2 + 1];
+      const ko = xx * ksize;
+      let s0 = 1 << (PRECISION_BITS - 1), s1 = s0, s2 = s0;
+      for (let x = 0; x < xmax; x++) {
+        const w = kk[ko + x], p = row + (x + xmin) * 3;
+        s0 += sd[p] * w; s1 += sd[p + 1] * w; s2 += sd[p + 2] * w;
       }
+      const o = (yy * width + xx) * 3;
+      td[o] = clip8(s0); td[o + 1] = clip8(s1); td[o + 2] = clip8(s2);
     }
-    src = tmp;
   }
-  if (!needV) return src;
-  const out = newImage(src.width, height);
-  const { ksize, kk, bounds } = vert;
-  const sd = src.data, od = out.data, w3 = src.width * 3;
+  return out;
+}
+
+function verticalPass(im, { ksize, kk, bounds }, height) {
+  const out = newImage(im.width, height);
+  const sd = im.data, od = out.data, w3 = im.width * 3;
   for (let yy = 0; yy < height; yy++) {
     const ymin = bounds[yy * 2], ymax = bounds[yy * 2 + 1];
     const ko = yy * ksize;
@@ -133,6 +118,36 @@ export function resize(im, width, height, filterName = "lanczos") {
     }
   }
   return out;
+}
+
+/** Image.resize(size, filter) for an RGB image; filter "lanczos" or "box". Like Pillow 13,
+ * the vertical pass goes first when the height shrinks by more than twice what the width
+ * does (the passes round, so the order shows in the result). */
+export function resize(im, width, height, filterName = "lanczos") {
+  if (width === im.width && height === im.height) {
+    return { width, height, data: im.data.slice() };
+  }
+  const filter = FILTERS[filterName];
+  const needH = width !== im.width;
+  const needV = height !== im.height;
+  const dy = im.height - height, dx = im.width - width;
+  const horizontalFirst = !(dy > 0 && dy > dx * 2);
+  const vert = needV || horizontalFirst ? precomputeCoeffs(im.height, 0, im.height, height, filter) : null;
+  const hor = needH ? precomputeCoeffs(im.width, 0, im.width, width, filter) : null;
+  let src = im;
+  if (horizontalFirst) {
+    if (needH) {
+      const yFirst = vert.bounds[0];
+      const yLast = vert.bounds[height * 2 - 2] + vert.bounds[height * 2 - 1];
+      for (let i = 0; i < height; i++) vert.bounds[i * 2] -= yFirst;
+      src = horizontalPass(src, hor, width, yFirst, yLast - yFirst);
+    }
+    if (needV) src = verticalPass(src, vert, height);
+  } else {
+    if (needV) src = verticalPass(src, vert, height);
+    if (needH) src = horizontalPass(src, hor, width, 0, height);
+  }
+  return src;
 }
 
 /** Nearest neighbour enlargement by whole factors (Image.NEAREST at integer scales). */

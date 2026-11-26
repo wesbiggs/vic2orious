@@ -1,7 +1,8 @@
-// Port of tools/img2c64.py's picture preparation: fit to the C64 screen with the system's
-// pixel aspect, map to the palette with one of the dithers, settings text and thumbnail.
-// A picture is an imaging.js image (RGB); the result is palette indices (rows of numbers),
-// as the converter takes them, so no colour lookup (vic2/palette.py KNOWN) is needed.
+// img2c64's picture preparation (ported from tools/img2c64.py, which now runs this): fit
+// to the C64 screen with the system's pixel aspect, map to the palette with one of the
+// dithers, settings text and thumbnail. A picture is an imaging.js image (RGB); the result
+// is palette indices (rows of numbers), as the converter takes them, so no colour lookup
+// (vic2/palette.py KNOWN) is needed.
 
 import { resize, quantize } from "./imaging.js";
 import { pyRound } from "./pyround.js";

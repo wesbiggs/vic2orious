@@ -1,6 +1,6 @@
 name: Set up the vic2orious toolchain
 description: >
-  Python with Pillow and numpy, cc65, and a headless VICE (x64sc, c1541) built from the
+  Python with Pillow and numpy, Node (the engine, web/js), cc65, and a headless VICE (x64sc, c1541) built from the
   upstream source (which, unlike Debian's package, includes the C64 ROMs). The VICE build
   is cached in the tool cache; sets VICE_DATA for vic2/font.py.
 
@@ -11,6 +11,9 @@ inputs:
   python-version:
     description: Python version
     default: "3.12"
+  node-version:
+    description: Node version (18 or later)
+    default: "20"
 
 runs:
   using: composite
@@ -18,6 +21,10 @@ runs:
     - uses: actions/setup-python@v5
       with:
         python-version: ${{ inputs.python-version }}
+
+    - uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
 
     - name: Python packages
       shell: bash
