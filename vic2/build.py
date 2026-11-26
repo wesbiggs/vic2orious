@@ -765,22 +765,26 @@ def stories(images):
     return texts
 
 
-def scroll_page(images, leading):
-    """The scroll demo's page: the intro, then every image's story. [(colour, text, page y)]
-    of the non-empty lines, and the page height."""
+SCROLL_AREA = (SCROLL_X, SCROLL_COLS, SCROLL_TOP)
+
+
+def scroll_page(texts, leading, area=SCROLL_AREA):
+    """The scroll demo's page: the texts one after another, a blank line between them,
+    wrapped to area = (x, cells, first line's page y). [(colour, text, page y)] of the
+    non-empty lines, and the page height."""
     font = fonts.current()
-    texts = [SCROLL_INTRO] + stories(images)
+    _, cols, top = area
     rows = []
     for t in texts:
         if rows:
             rows.append((TEXT_BODY, ""))
-        rows += text_layout(t, font, SCROLL_COLS * 8, 1 << 30, leading)[0]
+        rows += text_layout(t, font, cols * 8, 1 << 30, leading)[0]
     pitch = font.height + leading
-    lines = [(c, l, SCROLL_TOP + i * pitch) for i, (c, l) in enumerate(rows) if l]
-    return lines, SCROLL_TOP + len(rows) * pitch - leading + 8
+    lines = [(c, l, top + i * pitch) for i, (c, l) in enumerate(rows) if l]
+    return lines, top + len(rows) * pitch - leading + 8
 
 
-def write_scroll_inc(lines, height):
+def write_scroll_inc(lines, height, area=SCROLL_AREA):
     font = fonts.current()
     vmax = max(0, height - 192)
     nrows = vmax // 8 + 27                # rows a buffer can show: base <= vmax + 8, 25 rows
@@ -796,7 +800,7 @@ def write_scroll_inc(lines, height):
         for i in range(0, len(values), 16):
             out.append("        .byte " + ",".join(values[i:i + 16]))
 
-    out = ["SCR_N = %d" % len(lines), "SCR_VMAX = %d" % vmax, "SCR_X = %d" % SCROLL_X, "SCR_COLS = %d" % SCROLL_COLS, "        .data"]
+    out = ["SCR_N = %d" % len(lines), "SCR_VMAX = %d" % vmax, "SCR_X = %d" % area[0], "SCR_COLS = %d" % area[1], "        .data"]
     n = range(len(lines))
     table("scr_tlo", ["<scr_t%d" % i for i in n])
     table("scr_thi", [">scr_t%d" % i for i in n])
@@ -812,18 +816,21 @@ def write_scroll_inc(lines, height):
     return vmax
 
 
-def build_scroll(images, leading, out, defines=(), log=print):
+def build_scroll(images, leading, out, defines=(), log=print, texts=None, area=SCROLL_AREA):
     """Assemble asm/scroll.s with as much of the page as fits below SCROLL_END (and at most
-    255 lines). Returns (lines, page height, vmax)."""
+    255 lines): the intro and the images' stories, or just `texts` if given, in area (see
+    scroll_page). Returns (lines, page height, vmax)."""
     font = fonts.current()
     if font.height > 8 * SCROLL_VOFF:
         raise SystemExit("scroll demo: fonts up to %d pixels high" % (8 * SCROLL_VOFF))
-    lines, height = scroll_page(images, leading)
+    if texts is None:
+        texts = [SCROLL_INTRO] + stories(images)
+    lines, height = scroll_page(texts, leading, area)
     n = min(len(lines), 255)
     while True:
         part = lines[:n]
         h = height if n == len(lines) else part[-1][2] + font.height + 8
-        vmax = write_scroll_inc(part, h)
+        vmax = write_scroll_inc(part, h, area)
         assemble(out, "scroll.s", defines=defines)
         if 0x0801 + os.path.getsize(out) - 2 <= SCROLL_END:
             break
@@ -833,14 +840,14 @@ def build_scroll(images, leading, out, defines=(), log=print):
     return part, h, vmax
 
 
-def scroll_screen(lines, height, v):
+def scroll_screen(lines, height, v, area=SCROLL_AREA):
     """What asm/scroll.s shows at page line v: lines v..v+191 (24-row mode)."""
     font = fonts.current()
     rows = (max(height, v + 192) + 7) // 8
     scr = Screen(rows)
     scr.clear(0, 0, 40, rows, TEXT_BODY)
     for c, text, y in lines:
-        scr.text_line(font, SCROLL_X, y, SCROLL_COLS, c, fonts.codes(text))
+        scr.text_line(font, area[0], y, area[1], c, fonts.codes(text))
     return scr.pixels(v, 192)
 
 

@@ -256,6 +256,12 @@ reuses a cached conversion (`--force` converts again). Outputs, in `build/pal/` 
   pixel per frame (cursor down, cursor up or a joystick in port 2; space returns to
   BASIC). It uses the VIC's fine scroll and two bitmaps taking turns: v2t draws only the
   char row that scrolls in. Pages are up to 255 lines, as many as fit in memory.
+  `make scroll TXT=story.txt [FONT=...] [LEADING=n]` (`python3 -m vic2.scroll`) makes
+  `story.prg` here from that one text alone (no intro, no images; PAL and NTSC).
+  `AT=COLUMN,ROW` puts its first line there (default 1,1; row 24 starts it just below
+  the screen, for an intro that scrolls in), `WIDTH=N` wraps it to N cells, and
+  `AUTOSCROLL=N` scrolls it down by itself, one pixel every N frames, to the end (the
+  keys still work).
 - `stream-demo.prg`: the same stories arriving as a stream of plain ASCII text (3 bytes
   a frame), which the C64 wraps itself, word by word, into a ring of lines, scrolling
   smoothly as the newest line reaches the bottom. Space returns to BASIC.
