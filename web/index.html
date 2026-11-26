@@ -19,7 +19,12 @@
   <section class="input">
     <label id="drop" class="drop" for="file">
       <input id="file" type="file" accept="image/*">
-      <span class="drop-main">Drop a picture here, or choose one</span>
+      <span id="picked" class="picked" hidden>
+        <canvas id="thumb" width="1" height="1" aria-hidden="true"></canvas>
+        <span><span id="picked-name" class="picked-name"></span>
+          <span id="picked-size" class="drop-sub"></span></span>
+      </span>
+      <span id="drop-main" class="drop-main">Drop a picture here, or choose one</span>
       <span class="drop-sub">JPEG, PNG, WebP, GIF; HEIC where your browser reads it.
         It stays on your computer: the conversion runs in this page.</span>
     </label>
@@ -62,12 +67,17 @@
       <button role="tab" data-system="pal" aria-selected="true">PAL</button>
       <button role="tab" data-system="ntsc" aria-selected="false">NTSC</button>
     </div>
-    <canvas id="screen" width="1280" height="800" aria-label="The picture as the C64 shows it"></canvas>
-    <div class="compare">
-      <label for="split">C64</label>
-      <input id="split" type="range" min="0" max="1" step="0.001" value="0"
-        aria-label="Slide to show the original picture over the C64 one">
-      <label for="split">Original</label>
+    <div id="stage" class="stage">
+      <div id="frame" class="frame">
+        <canvas id="screen" width="1280" height="800" aria-label="The picture as the C64 shows it"></canvas>
+        <div id="curtain-line" class="curtain-line" aria-hidden="true"></div>
+        <div id="curtain" class="curtain" role="slider" tabindex="0"
+          aria-label="Curtain: the original picture over the C64 one"
+          aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span aria-hidden="true">◂▸</span></div>
+      </div>
+    </div>
+    <div class="screen-tools">
+      <span class="hint">Drag across the picture to draw the original over it.</span>
       <button id="full" type="button">Full screen</button>
       <button id="png" type="button">Save as PNG</button>
     </div>
@@ -81,13 +91,30 @@
         device and type <code>LOAD"NAME",8</code> then <code>RUN</code>. The program
         picks the PAL or NTSC version for the machine. Press space to go back to BASIC.</p>
     </details>
-    <details id="ranking-box" hidden>
-      <summary>How the dither was picked</summary>
-      <p>Each dither is tried on the picture, and what the C64 would show is scored against
-        the photo for structure (SSIM) and colour. In hires, a quick estimate picks the
-        best three for the full conversion; these are listed here. Use converts the
-        picture again with that dither, for PAL and NTSC.</p>
+    <details id="every-box">
+      <summary>Every dither, with the figures</summary>
+      <p class="hint">Each dither is tried on the picture, and what the C64 would show is scored
+        against the photo for structure (SSIM), blurred RMS error and colour (a*b*) error; the
+        weights say how much each counts. In hires a quick estimate (each cell's two
+        commonest colours and 8 sprite spans a line, no timing) ranks all of them and the
+        best three go through the converter. Changing the weights ranks them again here;
+        Convert again picks with them.</p>
+      <div class="every-bar">
+        <span class="seg" id="every-view" role="group" aria-label="Show">
+          <button type="button" data-view="quantised" aria-pressed="true">Dithered</button>
+          <button type="button" data-view="estimate" aria-pressed="false">C64 estimate</button>
+          <button type="button" data-view="original" aria-pressed="false">Original</button>
+        </span>
+        <span class="weights" id="weights">Weights
+          <label>RMS <input type="number" name="w0" value="0" min="0" step="0.5"></label>
+          <label>SSIM <input type="number" name="w1" value="1" min="0" step="0.5"></label>
+          <label>Colour <input type="number" name="w2" value="1" min="0" step="0.5"></label>
+        </span>
+      </div>
+      <h3 id="converted-head">Converted</h3>
       <table id="ranking"></table>
+      <h3>Every dither, by the estimate</h3>
+      <div id="grid" class="grid"></div>
     </details>
   </section>
 

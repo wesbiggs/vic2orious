@@ -1,17 +1,20 @@
 // The page: a dropped picture through pipeline.js in a pool of web workers, the result
-// shown as the C64 shows it, the PRG to download.
+// shown as the C64 shows it (with the original on a curtain over it), the PRG to
+// download, and every dither tried with its figures.
 
 import { fromRGBA } from "./imaging.js";
 import { Pool } from "./pool.js";
 import { makePrg } from "./pipeline.js";
 import { VIEW, PAR } from "./img2c64.js";
+import { rank, WEIGHTS } from "./pick.js";
 
 const $ = (id) => document.getElementById(id);
 const MAX_PIXELS = 16_000_000;      // larger photos are scaled down first (canvas limits)
 
 let pool = null, busy = false, last = null, file = null, result = null, shownSystem = "pal";
-let original = null;                // the picture last decoded (a canvas), for the comparison
-let split = 0;                      // how much of the screen, from the left, shows it
+let original = null;                // the picture last decoded (a canvas)
+let split = 0;                      // how much of the screen, from the left, the curtain covers
+let everyView = "quantised";        // what the cards show: quantised, estimate or original
 const urls = [];
 
 function workers() {
@@ -46,12 +49,37 @@ async function decode(f) {
   const ctx = c.getContext("2d", { willReadFrequently: true });
   ctx.drawImage(src, 0, 0, w, h);
   original = c;
+  showPicked(f, c, src.width, src.height);
   return fromRGBA(w, h, ctx.getImageData(0, 0, w, h).data);
+}
+
+/** The chosen picture in the drop box: a thumbnail, its name and size. */
+function showPicked(f, c, w, h) {
+  const t = $("thumb"), s = Math.min(1, 160 / c.width, 120 / c.height);
+  t.width = Math.max(1, Math.round(c.width * s));
+  t.height = Math.max(1, Math.round(c.height * s));
+  const ctx = t.getContext("2d");
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(c, 0, 0, t.width, t.height);
+  $("picked-name").textContent = f.name;
+  $("picked-size").textContent = `${w}×${h} pixels`;
+  $("picked").hidden = false;
+  $("drop-main").textContent = "Drop another picture, or choose one";
+}
+
+/** The weights the page picks with (img2c64 -w): three numbers >= 0, not all 0. */
+function weights() {
+  const w = ["w0", "w1", "w2"].map((n) => {
+    const v = +document.querySelector(`#weights [name=${n}]`).value;
+    return Number.isFinite(v) && v > 0 ? v : 0;
+  });
+  return w[0] + w[1] + w[2] > 0 ? w : WEIGHTS.slice();
 }
 
 function options() {
   const form = $("options");
-  return { mc: form.mode.value === "mc", dither: form.dither.value || null, chroma: +form.chroma.value };
+  return { mc: form.mode.value === "mc", dither: form.dither.value || null, chroma: +form.chroma.value,
+    weights: weights() };
 }
 
 function setStatus(text, fraction, error = false) {
@@ -76,6 +104,7 @@ async function convert() {
   const t0 = performance.now();
   try {
     const img = await decode(file);
+    const shownOriginal = original;
     if (!pool) pool = workers();
     const opts = options();
     const r = await makePrg(img, file.name, {
@@ -84,7 +113,7 @@ async function convert() {
       status: (text, f) => { if (last === run) setStatus(text + "…", f); },
     });
     if (last !== run) return;
-    r.original = original;
+    r.original = shownOriginal;
     result = r;
     const secs = Math.round((performance.now() - t0) / 1000);
     setStatus(`Done in ${secs} s.`, 1);
@@ -115,7 +144,7 @@ function show(r) {
   link($("v2i-pal"), r.systems.pal.v2i, `${name}-p.v2i`);
   link($("v2i-ntsc"), r.systems.ntsc.v2i, `${name}-n.v2i`);
   $("result").hidden = false;
-  setSplit(0);
+  split = 0;
   draw(shownSystem);
 }
 
@@ -125,27 +154,38 @@ function placement(s) {
   return { scale, wpx, x: Math.floor((40 - wpx / 8) / 2) * 8, y: Math.floor((25 - s.h / 8) / 2) * 8 };
 }
 
-/** The 320x200 screen as the C64 shows it (the picture on black), in the screen colours
- * the dithers were chosen for. */
-function screenCanvas(s) {
-  const { scale, wpx, x: x0, y: y0 } = placement(s);
-  const screen = new ImageData(320, 200);
-  for (let i = 3; i < screen.data.length; i += 4) screen.data[i] = 255;
-  for (let y = 0; y < s.h; y++) {
-    for (let x = 0; x < wpx; x++) {
-      const c = VIEW[s.rendered[y][Math.floor(x / scale)]];
-      const o = ((y0 + y) * 320 + x0 + x) * 4;
-      screen.data[o] = c[0]; screen.data[o + 1] = c[1]; screen.data[o + 2] = c[2];
+/** Palette indices (rows of them, or flat, w wide) as a canvas in the screen colours the
+ * dithers were chosen for, each index scale pixels wide. */
+function pixels(rows, w, h, scale) {
+  const nested = typeof rows[0] === "object";
+  const img = new ImageData(w * scale, h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w * scale; x++) {
+      const xi = Math.floor(x / scale);
+      const c = VIEW[nested ? rows[y][xi] : rows[y * w + xi]];
+      const o = (y * w * scale + x) * 4;
+      img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2]; img.data[o + 3] = 255;
     }
   }
-  const small = document.createElement("canvas");
-  small.width = 320; small.height = 200;
-  small.getContext("2d").putImageData(screen, 0, 0);
-  return small;
+  const c = document.createElement("canvas");
+  c.width = w * scale; c.height = h;
+  c.getContext("2d").putImageData(img, 0, 0);
+  return c;
 }
 
-/** One system's result, at the system's pixel aspect, with the original picture over it
- * from the left as far as the comparison slider says. */
+/** The 320x200 screen as the C64 shows it: the picture centred on black. */
+function screenCanvas(s) {
+  const { scale, x, y } = placement(s);
+  const c = document.createElement("canvas");
+  c.width = 320; c.height = 200;
+  const ctx = c.getContext("2d");
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, 320, 200);
+  ctx.drawImage(pixels(s.rendered, s.w, s.h, scale), x, y);
+  return c;
+}
+
+/** One system's result, at the system's pixel aspect. */
 function draw(system) {
   shownSystem = system;
   for (const b of document.querySelectorAll(".tabs button")) {
@@ -154,25 +194,27 @@ function draw(system) {
   if (!result) return;
   const s = result.systems[system];
   s.screen ||= screenCanvas(s);
-  paint(s);
-  $("screen").style.aspectRatio = String((320 * PAR[system]) / 200);
+  $("frame").style.setProperty("--ar", String((320 * PAR[system]) / 200));
+  setSplit(split);
   const { wpx } = placement(s);
   const pct = ((100 * s.wrong) / (s.w * s.h)).toFixed(1);
   $("stats").textContent = `${system.toUpperCase()}: ${s.setting} dither, ${wpx}×${s.h} pixels` +
     `${s.mc ? " (multicolour)" : ""}; ${pct}% of them drawn in a nearby colour.`;
-  ranking(s);
+  every();
 }
 
+/** The screen, with the original picture over it from the left edge to the curtain. */
 function paint(s) {
+  if (!s.screen) return;
   const canvas = $("screen"), ctx = canvas.getContext("2d");
   const k = canvas.width / 320;
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(s.screen, 0, 0, canvas.width, canvas.height);
   if (split <= 0 || !result.original) return;
-  const { wpx, x, y } = placement(s), cut = split * canvas.width;
+  const { wpx, x, y } = placement(s);
   ctx.save();
   ctx.beginPath();
-  ctx.rect(0, 0, cut, canvas.height);
+  ctx.rect(0, 0, split * canvas.width, canvas.height);
   ctx.clip();
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -180,13 +222,12 @@ function paint(s) {
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(result.original, x * k, y * k, wpx * k, s.h * k);
   ctx.restore();
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(Math.round(cut) - 2, 0, 4, canvas.height);
 }
 
 function setSplit(v) {
   split = Math.max(0, Math.min(1, v));
-  $("split").value = String(split);
+  $("frame").style.setProperty("--split", String(split));
+  $("curtain").setAttribute("aria-valuenow", String(Math.round(split * 100)));
   if (result) paint(result.systems[shownSystem]);
 }
 
@@ -209,7 +250,7 @@ function savePng() {
   }, "image/png");
 }
 
-/** Convert again with a dither from the ranking, for both systems. */
+/** Convert again with a dither from the figures, for both systems. */
 function useDither(setting) {
   const sel = $("options").dither;
   if (![...sel.options].some((o) => o.value === setting)) {
@@ -221,45 +262,123 @@ function useDither(setting) {
   convert();
 }
 
-function ranking(s) {
-  const box = $("ranking-box"), table = $("ranking");
-  box.hidden = !s.ranked;
-  if (!s.ranked) return;
-  table.replaceChildren();
-  const head = table.createTHead().insertRow();
-  for (const [t, num] of [["Dither", false], ["Score", true], ["SSIM", true], ["Colour error", true], ["Nearby colour", true], ["", false]]) {
-    const th = document.createElement("th");
-    th.textContent = t;
-    if (num) th.className = "num";
-    head.append(th);
+// ------------------------------------------------------------- every dither, with figures
+
+const copy = (rs) => rs.map((r) => Object.assign({}, r));
+const fix = (v, n) => (v === null || v === undefined ? "–" : v.toFixed(n));
+const share = (r) => (r.wrong === null || r.wrong === undefined ? "–" : `${((100 * r.wrong) / r.pixels).toFixed(1)}%`);
+
+/** The figures ranked with the page's weights: every dither by the estimate, and the
+ * converted ones as the picker ranks them (scaled over all, as img2c64 does). */
+function ranked(s) {
+  const w = weights();
+  const all = rank(copy(s.candidates), w);
+  let converted = null;
+  if (s.ranked) {
+    const done = new Set(s.ranked.map((r) => r.setting));
+    const extra = copy(all.filter((r) => !done.has(r.setting))).map((r) => Object.assign(r, { estimate: true }));
+    converted = rank(copy(s.ranked).concat(extra), w).filter((r) => !r.estimate);
   }
-  const body = table.createTBody();
-  for (const r of s.ranked) {
-    const row = body.insertRow();
-    if (r.setting === s.setting) row.className = "picked";
-    const cells = [r.setting, r.score.toFixed(2), r.ssim.toFixed(3), r.color.toFixed(1),
-      r.wrong === null ? "" : `${((100 * r.wrong) / r.pixels).toFixed(1)}%`];
-    cells.forEach((v, i) => {
-      const td = row.insertCell();
-      td.textContent = v;
-      if (i) td.className = "num";
-    });
-    const td = row.insertCell();
-    if (r.setting !== s.setting) {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.textContent = "Use";
-      b.title = `Convert again with ${r.setting} for PAL and NTSC`;
-      b.addEventListener("click", () => useDither(r.setting));
-      td.append(b);
+  return { all, converted, done: new Set((s.ranked || []).map((r) => r.setting)) };
+}
+
+function useButton(setting, s) {
+  if (setting === s.setting) return null;
+  const b = document.createElement("button");
+  b.type = "button";
+  b.textContent = "Use";
+  b.title = `Convert again with ${setting} for PAL and NTSC`;
+  b.addEventListener("click", () => useDither(setting));
+  return b;
+}
+
+function every() {
+  const s = result.systems[shownSystem];
+  const { all, converted, done } = ranked(s);
+  const table = $("ranking");
+  $("converted-head").hidden = table.hidden = !converted;
+  table.replaceChildren();
+  if (converted) {
+    const head = table.createTHead().insertRow();
+    for (const [t, num] of [["Dither", false], ["Score", true], ["SSIM", true], ["RMS", true],
+      ["Colour", true], ["Nearby colour", true], ["", false]]) {
+      const th = document.createElement("th");
+      th.textContent = t;
+      if (num) th.className = "num";
+      head.append(th);
+    }
+    const body = table.createTBody();
+    for (const r of converted) {
+      const row = body.insertRow();
+      if (r.setting === s.setting) row.className = "picked";
+      [r.setting, fix(r.score, 2), fix(r.ssim, 3), fix(r.rms, 2), fix(r.color, 2), share(r)].forEach((v, i) => {
+        const td = row.insertCell();
+        td.textContent = v;
+        if (i) td.className = "num";
+      });
+      const b = useButton(r.setting, s);
+      row.insertCell().append(...(b ? [b] : []));
     }
   }
+  $("grid").replaceChildren(...all.map((r, i) => card(r, s, i === 0, done.has(r.setting))));
 }
+
+function el(tag, cls, ...kids) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  e.append(...kids.filter((k) => k !== null && k !== undefined));
+  return e;
+}
+
+function card(r, s, best, wasConverted) {
+  const scale = s.mc ? 2 : 1;
+  const c = document.createElement("canvas");
+  c.width = r.w * scale * 2; c.height = r.h * 2;
+  c.style.aspectRatio = String((r.w * scale * PAR[shownSystem]) / r.h);
+  const ctx = c.getContext("2d");
+  if (everyView === "original" && result.original) {
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(result.original, 0, 0, c.width, c.height);
+  } else {
+    const rows = everyView === "estimate" && r.shownRows ? r.shownRows : r.idx;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(pixels(rows, r.w, r.h, scale), 0, 0, c.width, c.height);
+  }
+  const picked = r.setting === s.setting;
+  const badge = picked ? "picked" : best ? "best estimate" : wasConverted && !s.mc ? "converted" : null;
+  const metric = (name, v, title) => {
+    const m = el("span", null, name, el("b", null, v));
+    if (title) m.title = title;
+    return m;
+  };
+  const fill = el("div");
+  fill.style.width = `${Math.round(100 * r.score)}%`;
+  return el("div", "card" + (picked ? " picked-card" : ""),
+    el("div", "pic", c, badge ? el("span", "badge", badge) : null),
+    el("div", "body",
+      el("div", "name", el("span", null, r.setting), el("span", null, `score ${fix(r.score, 2)}`)),
+      el("div", "scorebar", fill),
+      el("div", "metrics",
+        metric("SSIM", fix(r.ssim, 3)),
+        metric("colour", fix(r.color, 2)),
+        metric("RMS", fix(r.rms, 2)),
+        metric("nearby", share(r), "pixels the estimate draws in a nearby colour")),
+      useButton(r.setting, s)));
+}
+
+// ---------------------------------------------------------------------------- the page
 
 function pickFile(f) {
   if (!f) return;
   file = f;
   convert();
+}
+
+function remember(key, value) {
+  try { localStorage.setItem(key, value); } catch { /* no storage: it is a convenience */ }
+}
+function recall(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
 }
 
 function init() {
@@ -272,6 +391,7 @@ function init() {
     drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); });
   }
   drop.addEventListener("drop", (e) => pickFile(e.dataTransfer.files[0]));
+
   const form = $("options");
   form.addEventListener("change", () => {
     for (const o of form.dither.querySelectorAll("[data-hires]")) o.disabled = form.mode.value === "mc";
@@ -282,20 +402,50 @@ function init() {
   form.chroma.addEventListener("input", () => {
     $("chroma-value").textContent = (+form.chroma.value).toFixed(2);
   });
-  $("split").addEventListener("input", (e) => setSplit(+e.target.value));
-  const canvas = $("screen");
+
+  // the curtain: drag anywhere on the picture, or the handle with the keyboard
+  const frame = $("frame");
   const fromPointer = (e) => {
-    const b = canvas.getBoundingClientRect();
+    const b = frame.getBoundingClientRect();
     setSplit((e.clientX - b.left) / b.width);
   };
-  canvas.addEventListener("pointerdown", (e) => { canvas.setPointerCapture(e.pointerId); fromPointer(e); });
-  canvas.addEventListener("pointermove", (e) => { if (canvas.hasPointerCapture(e.pointerId)) fromPointer(e); });
-  $("full").hidden = !canvas.requestFullscreen;
-  $("full").addEventListener("click", () => canvas.requestFullscreen());
+  frame.addEventListener("pointerdown", (e) => {
+    if (!result) return;
+    frame.setPointerCapture(e.pointerId);
+    fromPointer(e);
+    e.preventDefault();
+  });
+  frame.addEventListener("pointermove", (e) => { if (frame.hasPointerCapture(e.pointerId)) fromPointer(e); });
+  $("curtain").addEventListener("keydown", (e) => {
+    const step = e.shiftKey ? 0.1 : 0.02;
+    const to = { ArrowLeft: split - step, ArrowRight: split + step, Home: 0, End: 1 }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    setSplit(to);
+  });
+  const stage = $("stage");
+  $("full").hidden = !stage.requestFullscreen;
+  $("full").addEventListener("click", () => stage.requestFullscreen());
   $("png").addEventListener("click", savePng);
   for (const b of document.querySelectorAll(".tabs button")) {
     b.addEventListener("click", () => draw(b.dataset.system));
   }
+
+  // every dither: what the cards show, the weights; open or shut as last time
+  const box = $("every-box");
+  box.open = recall("vic2orious.every") === "open";
+  box.addEventListener("toggle", () => remember("vic2orious.every", box.open ? "open" : "shut"));
+  for (const b of $("every-view").querySelectorAll("button")) {
+    b.addEventListener("click", () => {
+      everyView = b.dataset.view;
+      for (const o of $("every-view").querySelectorAll("button")) o.setAttribute("aria-pressed", String(o === b));
+      if (result) every();
+    });
+  }
+  $("weights").addEventListener("input", () => {
+    if (result) every();
+    $("again").hidden = !file || busy || form.dither.value !== "";
+  });
 }
 
 init();

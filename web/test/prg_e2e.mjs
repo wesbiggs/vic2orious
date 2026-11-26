@@ -2,7 +2,7 @@
 // compared with the PRG `python3 -m vic2.prg` made of the same photo. The photo comes as
 // web/test/prep_golden.py's JSON (the picture as img2c64 loads it); the metadata's date
 // is left out of the comparison, the tool name is the Python's.
-//   node web/test/prg_e2e.mjs photo.json python.prg SOURCE-NAME [-m] [-d DITHER] [-c S]
+//   node web/test/prg_e2e.mjs photo.json python.prg SOURCE-NAME [-m] [-d DITHER] [-c S] [-w R,S,C]
 import { readFileSync, writeFileSync } from "node:fs";
 import { Worker } from "node:worker_threads";
 import os from "node:os";
@@ -26,6 +26,7 @@ const pool = new Pool(Math.max(1, Math.min(8, os.cpus().length - 1)), spawn);
 const t = Date.now();
 let lastText = "";
 const r = await makePrg(img, source, {
+  weights: opts.includes("-w") ? opts[opts.indexOf("-w") + 1].split(",").map(Number) : undefined,
   mc: opts.includes("-m"), chroma: opts.includes("-c") ? +opts[opts.indexOf("-c") + 1] : 1.0, dither: opts.includes("-d") ? opts[opts.indexOf("-d") + 1] : null,
   run: (type, payload, onProgress) => pool.run(type, payload, onProgress),
   status: (text, f) => { if (text !== lastText) { console.log(`  ${((Date.now() - t) / 1000).toFixed(1)} s ${text} (${Math.round(f * 100)}%)`); lastText = text; } },

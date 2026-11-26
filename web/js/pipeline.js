@@ -22,13 +22,14 @@ export function fixedCandidate(dither) {
 
 /**
  * img: the photo ({width, height, data} RGB). source: its file name. Options: mc
- * (multicolour), dither (null: pick), chroma (img2c64 -c), run (see above), status(text, fraction) for
+ * (multicolour), dither (null: pick), chroma (img2c64 -c), weights (img2c64 -w, for the
+ * pick), run (see above), status(text, fraction) for
  * progress, date for the metadata, by for its "quantized by".
  * Returns {prg, name, systems: {pal, ntsc}}; each system has v2i, rendered (rows of
  * palette indices as the C64 shows them), w, h, mc, wrong, setting (the dither) and
  * ranked (the picker's results, best first; null with a given dither).
  */
-export async function makePrg(img, source, { mc = false, dither = null, chroma = 1.0, run, status = () => {}, date = new Date(), by = "vic2orious web" } = {}) {
+export async function makePrg(img, source, { mc = false, dither = null, chroma = 1.0, weights = pick.WEIGHTS, run, status = () => {}, date = new Date(), by = "vic2orious web" } = {}) {
   const box = [img2c64.MAX_W, img2c64.MAX_H];
   const name = source.replace(/^.*[\\/]/, "").replace(/\.[^.]*$/, "") || "picture";
   // progress: each light job counts 1, each conversion HEAVY, as they finish (or move)
@@ -67,7 +68,7 @@ export async function makePrg(img, source, { mc = false, dither = null, chroma =
   await Promise.all(SYSTEMS.map(async (system, si) => {
     const res = first[si];
     const outs = new Map(res.map((r) => [r.result.setting, r]));
-    let ranked = auto ? pick.rank(res.map((r) => r.result)) : null;
+    let ranked = auto ? pick.rank(res.map((r) => r.result), weights) : null;
     const convs = new Map();
     if (top) {
       const conv = await Promise.all(ranked.slice(0, top).map((est) => {
@@ -76,7 +77,7 @@ export async function makePrg(img, source, { mc = false, dither = null, chroma =
       }));
       for (const c of conv) if (c.conv) convs.set(c.result.setting, c.conv);
       const extra = ranked.slice(top).map((r) => Object.assign({}, r, { estimate: true }));
-      ranked = pick.rank(conv.map((c) => c.result).concat(extra));
+      ranked = pick.rank(conv.map((c) => c.result).concat(extra), weights);
       ranked = ranked.filter((r) => !r.estimate);
     }
     const best = auto ? ranked[0] : res[0].result;
@@ -85,13 +86,15 @@ export async function makePrg(img, source, { mc = false, dither = null, chroma =
     if (reuse) total -= HEAVY;           // the picker's conversion serves
     report(stage);
     const conv = reuse || await job("convert", { system, idx: o.idx, w: o.w, h: o.h, mc }, HEAVY);
-    const picked = auto ? pick.pickedText(ranked, cands.length, top, pick.WEIGHTS, by) : null;
+    const picked = auto ? pick.pickedText(ranked, cands.length, top, weights, by) : null;
     const settings = img2c64.settings(source.replace(/^.*[\\/]/, ""), system, img2c64.parseDither(best.dither),
       { box, chroma, runs: best.runs, picked, mc, by });
     const v2i = pack(conv, { settings, thumb: prep[system].thumb, imageName: name + SUFFIX[system] + ".png", date });
     systems[system] = {
       v2i, rendered: conv.rendered, w: conv.w, h: conv.h, mc, wrong: conv.wrong,
       setting: best.setting, ranked, settings, sameAsCentred: sameAsCentred(conv.w, conv.h, mc),
+      // every dither tried, by the estimate: its indices (w x h) and figures
+      candidates: res.map((r) => Object.assign({}, r.result, { idx: r.idx, w: r.w, h: r.h })),
     };
   }));
   status("Packing the PRG", 1);
