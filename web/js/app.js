@@ -456,15 +456,21 @@ function init() {
   drop.addEventListener("drop", (e) => pickFile(e.dataTransfer.files[0]));
 
   const form = $("options");
-  form.addEventListener("change", () => {
+  // the browser may bring back the form as it was before a reload: show what it holds
+  const modeChanged = () => {
     for (const o of form.dither.querySelectorAll("[data-hires]")) o.disabled = form.mode.value === "mc";
     if (form.dither.selectedOptions[0]?.disabled) form.dither.value = "";
+  };
+  const chromaShown = () => { $("chroma-value").textContent = (+form.chroma.value).toFixed(2); };
+  form.addEventListener("change", () => {
+    modeChanged();
     $("again").hidden = !file || busy;
   });
   form.addEventListener("submit", (e) => { e.preventDefault(); convert(); });
-  form.chroma.addEventListener("input", () => {
-    $("chroma-value").textContent = (+form.chroma.value).toFixed(2);
-  });
+  form.chroma.addEventListener("input", chromaShown);
+  modeChanged();
+  chromaShown();
+  window.addEventListener("pageshow", () => { modeChanged(); chromaShown(); });
 
   // the curtain: drag anywhere on the picture, or the handle with the keyboard
   const frame = $("frame");
