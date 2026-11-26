@@ -1,0 +1,657 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vic2orious</title>
+<style>
+:root {
+  --bg: #15161c; --panel: #1e2029; --panel2: #262935; --line: #343846;
+  --text: #e4e6ee; --dim: #9096a8; --accent: #7d77ff; --accent2: #a1ff8d;
+  --warn: #ff6c76; --good: #a1ff8d; --radius: 8px;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; align-items: baseline; gap: 12px; padding: 14px 20px;
+  border-bottom: 1px solid var(--line); }
+header h1 { margin: 0; font: 600 20px var(--mono); letter-spacing: .02em; }
+header h1 span { color: var(--accent); }
+header .ver { color: var(--dim); font: 12px var(--mono); }
+header .spacer { flex: 1; }
+main { display: grid; grid-template-columns: 330px 1fr; gap: 20px; padding: 20px;
+  align-items: start; }
+@media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 12px; } }
+aside { display: flex; flex-direction: column; gap: 16px; position: sticky; top: 12px; }
+@media (max-width: 900px) { aside { position: static; } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 14px; }
+.panel h2 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase;
+  letter-spacing: .08em; color: var(--dim); font-weight: 600; }
+#drop { border: 2px dashed var(--line); border-radius: var(--radius); padding: 18px;
+  text-align: center; color: var(--dim); cursor: pointer; transition: .15s; }
+#drop.over, #drop:hover { border-color: var(--accent); color: var(--text); }
+#drop input { display: none; }
+#source { margin-top: 12px; display: none; }
+#source img { width: 100%; border-radius: 4px; display: block; background: #000; }
+#source .meta { color: var(--dim); font-size: 12px; margin-top: 6px; word-break: break-all; }
+label.row { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin: 8px 0; }
+label.row > span:first-child { color: var(--dim); }
+select, input[type=text], input[type=number] { background: var(--panel2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 5px; padding: 5px 7px; font: inherit; }
+input[type=text] { font-family: var(--mono); font-size: 13px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { background: var(--panel2); color: var(--dim); border: 0; padding: 5px 10px;
+  font: inherit; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button.on { background: var(--accent); color: #fff; }
+.seg button:disabled { opacity: .4; cursor: default; }
+.dithers { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px; margin: 6px 0; }
+.dithers label { display: flex; gap: 6px; align-items: center; font: 13px var(--mono); cursor: pointer; }
+.dithers label.off { opacity: .35; }
+.links { font-size: 12px; }
+.links a { color: var(--accent); cursor: pointer; margin-right: 10px; }
+button.go { width: 100%; margin-top: 10px; background: var(--accent); color: #fff; border: 0;
+  border-radius: 6px; padding: 9px; font: 600 14px inherit; cursor: pointer; }
+button.go:disabled { opacity: .5; cursor: default; }
+button.small, a.small { background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+  border-radius: 5px; padding: 3px 9px; font: 12px inherit; cursor: pointer; text-decoration: none;
+  display: inline-block; white-space: nowrap; }
+button.small:hover, a.small:hover { border-color: var(--accent); }
+button.small.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.hint { color: var(--dim); font-size: 12px; }
+.err { color: var(--warn); font-size: 13px; margin-top: 8px; white-space: pre-wrap; }
+#jobs { max-height: 180px; overflow: auto; font-size: 13px; }
+#jobs a { display: block; color: var(--dim); text-decoration: none; padding: 2px 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#jobs a:hover, #jobs a.on { color: var(--text); }
+section.set { margin-bottom: 26px; }
+.sethead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.sethead h3 { margin: 0; font-size: 15px; }
+.tag { font: 12px var(--mono); background: var(--panel2); border: 1px solid var(--line);
+  padding: 1px 7px; border-radius: 10px; color: var(--dim); }
+.toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  overflow: hidden; display: flex; flex-direction: column; }
+.card.best { border-color: var(--accent2); }
+.card .pic { background: #000; display: flex; align-items: center; justify-content: center;
+  aspect-ratio: 384 / 272; cursor: zoom-in; position: relative; }
+.card .pic img { image-rendering: pixelated; max-width: 100%; max-height: 100%; }
+.card .pic .badge { position: absolute; top: 6px; left: 6px; background: var(--accent2);
+  color: #000; font: 600 11px var(--mono); padding: 1px 6px; border-radius: 9px; }
+.card .pic .sys { position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,.6);
+  font: 11px var(--mono); padding: 1px 6px; border-radius: 9px; }
+.card .body { padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.card .name { font: 600 13px var(--mono); display: flex; justify-content: space-between; }
+.metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; font: 11px var(--mono);
+  color: var(--dim); }
+.metrics b { display: block; color: var(--text); font-weight: 500; font-size: 12px; }
+.scorebar { height: 4px; background: var(--panel2); border-radius: 2px; overflow: hidden; }
+.scorebar div { height: 100%; background: var(--accent); }
+.card .acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: auto; }
+.spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--dim);
+  border-top-color: transparent; border-radius: 50%; animation: spin .8s linear infinite;
+  vertical-align: -2px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.working { color: var(--dim); font-size: 13px; padding: 30px 0; text-align: center; }
+.result { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 14px; margin-bottom: 16px; }
+.result .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; }
+.screen { background: #000; padding: 6% 6%; border-radius: 4px; position: relative; max-width: 760px; }
+.screen .inner { position: relative; width: 100%; aspect-ratio: 320 / 200; background: #000;
+  outline: 1px dashed #333; }
+.screen .inner img { position: absolute; image-rendering: pixelated; }
+.screen > img.full { width: 100%; image-rendering: pixelated; display: block; }
+.stats { display: flex; gap: 18px; flex-wrap: wrap; font: 12px var(--mono); color: var(--dim);
+  margin: 8px 0; }
+.stats b { color: var(--text); font-weight: 500; }
+pre.log { background: #0e0f13; color: var(--dim); font: 11px/1.4 var(--mono); padding: 8px;
+  border-radius: 5px; max-height: 140px; overflow: auto; white-space: pre-wrap; margin: 8px 0 0; }
+#empty { color: var(--dim); text-align: center; padding: 80px 20px; }
+#empty h2 { color: var(--text); font-weight: 500; }
+/* lightbox */
+#lb { position: fixed; inset: 0; background: rgba(5,5,8,.94); display: none; flex-direction: column;
+  z-index: 10; }
+#lb.on { display: flex; }
+#lb .bar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--line); }
+#lb .bar .title { font: 600 14px var(--mono); flex: 1; }
+#lb .stage { flex: 1; overflow: auto; display: flex; align-items: center; justify-content: center;
+  padding: 16px; }
+#lb .stage img { image-rendering: pixelated; }
+#lb .ab { position: relative; }
+#lb .ab img { display: block; }
+#lb .ab .top { position: absolute; left: 0; top: 0; overflow: hidden; height: 100%;
+  border-right: 2px solid var(--accent2); }
+#lb .ab .top img { max-width: none; }
+.x { background: none; border: 0; color: var(--text); font-size: 22px; cursor: pointer; }
+</style>
+</head>
+<body>
+<header>
+  <h1>vic<span>2</span>orious</h1>
+  <span class="ver" id="ver"></span>
+  <span class="spacer"></span>
+  <span class="hint" id="status"></span>
+</header>
+<main>
+  <aside>
+    <div class="panel">
+      <h2>Picture</h2>
+      <div id="drop">
+        <input type="file" id="file" accept="image/*,.heic,.heif">
+        <div><b>Drop a picture</b> or click to choose</div>
+        <div class="hint">any format img2c64 reads; an img2c64 PNG can be converted as is</div>
+      </div>
+      <div id="source"><img id="srcimg" alt="source"><div class="meta" id="srcmeta"></div></div>
+      <div class="err" id="uperr"></div>
+    </div>
+
+    <div class="panel" id="opts">
+      <h2>Quantise</h2>
+      <label class="row"><span>Mode</span>
+        <span class="seg" id="mode"><button data-v="hires" class="on">Hires</button><button data-v="mc">Multicolour</button></span></label>
+      <label class="row"><span>Aspect</span>
+        <select id="aspect">
+          <option value="both">PAL + NTSC</option><option value="pal">PAL</option>
+          <option value="ntsc">NTSC</option><option value="none">none (C64-size art)</option>
+        </select></label>
+      <label class="row"><span>Palette</span><select id="palette"></select></label>
+      <label class="row"><span>Chroma <span class="hint" id="chromav">1.00</span></span>
+        <input type="range" id="chroma" min="0.1" max="2" step="0.05" value="1" style="width:150px"></label>
+      <label class="row"><span>Fit</span>
+        <input type="text" id="size" value="320x200" size="9" title="WxH, multiples of 8, at most 320x200"></label>
+      <div style="margin-top:10px" class="row"><span class="hint">Dithers</span>
+        <span class="links"><a id="all">all</a><a id="noneb">none</a></span></div>
+      <div class="dithers" id="dithers"></div>
+      <label class="row"><span>Custom</span>
+        <input type="text" id="custom" placeholder="fs:0.6 hybrid:60,l=6" style="width:180px"></label>
+      <button class="go" id="quantise" disabled>Quantise</button>
+      <div class="err" id="qerr"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Ranking</h2>
+      <div class="hint" style="margin-bottom:6px">weights for the estimate's metrics against the source (img2c64 -w)</div>
+      <label class="row"><span>blurred RMS</span><input type="number" id="w0" value="0" min="0" step="0.5" style="width:70px"></label>
+      <label class="row"><span>SSIM</span><input type="number" id="w1" value="1" min="0" step="0.5" style="width:70px"></label>
+      <label class="row"><span>colour (a*b*)</span><input type="number" id="w2" value="1" min="0" step="0.5" style="width:70px"></label>
+    </div>
+
+    <div class="panel">
+      <h2>Earlier pictures</h2>
+      <div id="jobs" class="hint">none yet</div>
+    </div>
+  </aside>
+
+  <div id="content">
+    <div id="empty"><h2>Turn a picture into a C64 program</h2>
+      <p>Upload a picture, try dithers in hires and multicolour, compare what the C64 would show,
+      then convert the one you like and download its PNG, <code>.v2i</code> and a PRG that runs on PAL and NTSC.</p></div>
+    <div id="results"></div>
+    <div id="sets"></div>
+  </div>
+</main>
+
+<div id="lb">
+  <div class="bar">
+    <button class="x" id="lbprev" title="previous (←)">‹</button>
+    <span class="title" id="lbtitle"></span>
+    <span class="seg" id="lbview"></span>
+    <span class="seg" id="lbzoom"><button data-z="1">1×</button><button data-z="2" class="on">2×</button><button data-z="3">3×</button><button data-z="4">4×</button></span>
+    <button class="x" id="lbnext" title="next (→)">›</button>
+    <button class="x" id="lbclose" title="close (esc)">×</button>
+  </div>
+  <div class="stage" id="lbstage"></div>
+  <div class="hint" style="text-align:center;padding:6px" id="lbhint"></div>
+</div>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const el = (tag, attrs = {}, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null && v !== false) e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const k of kids.flat()) if (k !== null && k !== undefined && k !== false)
+    e.append(k instanceof Node ? k : document.createTextNode(k));
+  return e;
+};
+let CFG = null, JOB = null, POLL = null, MODE = "hires", VIEW = "quantised";
+const LB = { list: [], i: 0, view: "quantised", zoom: 2 };
+
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} :
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({ error: r.statusText }));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+const fileUrl = (rel, dl) => `/files/${JOB.id}/${rel}${dl ? "?dl=1" : ""}`;
+const par = sys => CFG.par[sys || "pal"];
+const pct = (a, b) => (100 * a / b).toFixed(1) + "%";
+
+// ---- setup --------------------------------------------------------------------------
+async function init() {
+  CFG = await api("/api/config");
+  $("#ver").textContent = "v" + CFG.version;
+  for (const [v, n] of CFG.palettes) $("#palette").append(el("option", { value: v }, n));
+  for (const [name] of CFG.candidates) {
+    $("#dithers").append(el("label", { "data-d": name },
+      el("input", { type: "checkbox", value: name, checked: true }), name));
+  }
+  setMode("hires");
+  $("#mode").addEventListener("click", e => e.target.dataset.v && setMode(e.target.dataset.v));
+  $("#all").onclick = () => document.querySelectorAll("#dithers input:not(:disabled)").forEach(c => c.checked = true);
+  $("#noneb").onclick = () => document.querySelectorAll("#dithers input").forEach(c => c.checked = false);
+  $("#chroma").oninput = () => $("#chromav").textContent = (+$("#chroma").value).toFixed(2);
+  for (const w of ["#w0", "#w1", "#w2"]) $(w).oninput = render;
+  $("#quantise").onclick = quantise;
+  const drop = $("#drop"), file = $("#file");
+  drop.onclick = () => file.click();
+  file.onchange = () => file.files[0] && upload(file.files[0]);
+  drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
+  drop.ondragleave = () => drop.classList.remove("over");
+  drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over");
+    if (e.dataTransfer.files[0]) upload(e.dataTransfer.files[0]); };
+  window.addEventListener("hashchange", () => load(location.hash.slice(1)));
+  initLightbox();
+  await listJobs();
+  if (location.hash.length > 1) load(location.hash.slice(1));
+}
+
+function setMode(m) {
+  MODE = m;
+  for (const b of $("#mode").children) b.classList.toggle("on", b.dataset.v === m);
+  for (const l of document.querySelectorAll("#dithers label")) {
+    const off = m === "mc" && l.dataset.d.startsWith("hybrid");
+    l.classList.toggle("off", off);
+    l.querySelector("input").disabled = off;
+  }
+}
+
+async function listJobs() {
+  const jobs = await api("/api/jobs");
+  const box = $("#jobs");
+  box.replaceChildren();
+  if (!jobs.length) { box.textContent = "none yet"; return; }
+  for (const j of jobs) box.append(el("a", { href: "#" + j.id, class: JOB && JOB.id === j.id ? "on" : "",
+    title: new Date(j.created * 1000).toLocaleString() }, j.name));
+}
+
+async function upload(f) {
+  $("#uperr").textContent = "";
+  $("#status").replaceChildren(el("span", { class: "spin" }), " uploading " + f.name);
+  try {
+    const r = await fetch("/api/upload", { method: "POST", body: f,
+      headers: { "X-Filename": encodeURIComponent(f.name) } });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error);
+    location.hash = j.id;
+    listJobs();
+  } catch (e) { $("#uperr").textContent = e.message; }
+  $("#status").textContent = "";
+}
+
+async function load(id) {
+  try { JOB = await api("/api/job/" + id); }
+  catch (e) { $("#uperr").textContent = e.message; return; }
+  $("#source").style.display = "block";
+  $("#srcimg").src = fileUrl("source.png");
+  $("#srcmeta").textContent = `${JOB.name} · ${JOB.w}×${JOB.h}` +
+    (JOB.c64 ? ` · img2c64 PNG (${JOB.c64.mc ? "multicolour" : "hires"}, ${JOB.c64.system || "no aspect"})` : "");
+  $("#quantise").disabled = false;
+  for (const a of document.querySelectorAll("#jobs a")) a.classList.toggle("on", a.getAttribute("href") === "#" + id);
+  if (JOB.c64 && !Object.values(JOB.tasks).length) {
+    // an img2c64 PNG: offer it as it is, next to the dithers
+    api("/api/preview", { id: JOB.id, opts: { aspect: "none", palette: "tv" }, settings: ["as uploaded"] })
+      .then(() => refresh());
+  }
+  render();
+  watch();
+}
+
+async function refresh() {
+  if (!JOB) return;
+  try { JOB = await api("/api/job/" + JOB.id); } catch (e) { return; }
+  render();
+  watch();
+}
+function watch() {
+  const busy = Object.values(JOB.tasks).some(t => t.state === "working");
+  clearTimeout(POLL);
+  if (busy) POLL = setTimeout(refresh, 1000);
+  const n = Object.values(JOB.tasks).filter(t => t.state === "working").length;
+  $("#status").replaceChildren(...(n ? [el("span", { class: "spin" }), ` ${n} task${n > 1 ? "s" : ""} working`] : []));
+}
+
+async function quantise() {
+  $("#qerr").textContent = "";
+  const settings = [...document.querySelectorAll("#dithers input:checked:not(:disabled)")].map(c => c.value);
+  for (const s of $("#custom").value.split(/[\s;]+/).filter(Boolean))
+    settings.push(s);
+  if (!settings.length) { $("#qerr").textContent = "choose at least one dither"; return; }
+  const opts = { mc: MODE === "mc", aspect: $("#aspect").value, palette: $("#palette").value,
+    chroma: +$("#chroma").value, size: $("#size").value.trim() };
+  try { await api("/api/preview", { id: JOB.id, opts, settings }); }
+  catch (e) { $("#qerr").textContent = e.message; return; }
+  refresh();
+}
+
+// ---- ranking (dither_pick.rank) -----------------------------------------------------
+function rank(rs) {
+  const w = ["#w0", "#w1", "#w2"].map(s => Math.max(0, +$(s).value || 0));
+  const total = w.reduce((a, b) => a + b, 0) || 1;
+  const metrics = [["rms", false], ["ssim", true], ["color", false]];
+  const done = rs.filter(r => r.state === "done");
+  for (const [m, higher] of metrics) {
+    const vals = done.map(r => r.result[m]);
+    const lo = Math.min(...vals), hi = Math.max(...vals);
+    for (const r of done) {
+      const t = hi === lo ? 1 : (r.result[m] - lo) / (hi - lo);
+      r["n" + m] = higher ? t : 1 - t;
+    }
+  }
+  for (const r of done) r.score = metrics.reduce((a, [m], i) => a + w[i] * r["n" + m], 0) / total;
+  return done.length > 1 ? done.reduce((a, b) => (b.score > a.score ? b : a)) : null;
+}
+
+// ---- rendering ----------------------------------------------------------------------
+function optsLabel(t) {
+  const o = t.opts;
+  if (t.dither === null) return "uploaded img2c64 PNG";
+  const pal = Object.fromEntries(CFG.palettes)[o.palette] || o.palette;
+  return `${o.mc ? "Multicolour" : "Hires"} · ${pal} · chroma ${(+o.chroma).toFixed(2)} · fit ${o.size.join("×")}`;
+}
+
+function picDims(t, which) {
+  // screen pixels across (multicolour doubled) and the pixel aspect of its system
+  const r = t.result;
+  if (which === "source") return { w: JOB.w, h: JOB.h, par: 1 };
+  return { w: r.w * (t.mc ? 2 : 1), h: r.h, par: par(t.system) };
+}
+function viewSrc(t, which) {
+  if (which === "estimate") return fileUrl(t.estimate);
+  if (which === "source") return fileUrl("source.png");
+  return fileUrl(t.png);
+}
+
+function render() {
+  if (!JOB) return;
+  $("#empty").style.display = "none";
+  renderResults();
+  const sets = new Map();
+  for (const t of Object.values(JOB.tasks)) {
+    if (t.kind !== "preview") continue;
+    const k = t.okey + "|" + (t.dither === null ? "upload" : t.opts.mc);
+    if (!sets.has(k)) sets.set(k, []);
+    sets.get(k).push(t);
+  }
+  const box = $("#sets");
+  box.replaceChildren();
+  if (sets.size) {
+    box.append(el("div", { class: "toolbar" },
+      el("span", { class: "hint" }, "Show"),
+      seg(["quantised", "estimate", "source"], VIEW, v => { VIEW = v; render(); },
+        { quantised: "Quantised", estimate: "C64 estimate", source: "Source" }),
+      el("span", { class: "hint" }, "The estimate: each cell's two commonest colours plus 8 sprite spans a line, no timing (multicolour: the picture). Convert for the real thing.")));
+  }
+  const ordered = [...sets.values()].sort((a, b) =>
+    Math.max(...b.map(t => t.started)) - Math.max(...a.map(t => t.started)));
+  for (const ts of ordered) {
+    const bySys = {};
+    for (const t of ts) (bySys[t.system || "none"] ||= []).push(t);
+    const sec = el("section", { class: "set" });
+    sec.append(el("div", { class: "sethead" },
+      el("h3", {}, optsLabel(ts[0])),
+      el("button", { class: "small", title: "remove these previews from the page",
+        onclick: () => api("/api/forget", { id: JOB.id, keys: ts.map(t => t.key) }).then(refresh) }, "remove")));
+    for (const [sys, list] of Object.entries(bySys)) {
+      const best = rank(list);
+      list.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+      const grid = el("div", { class: "grid" });
+      for (const t of list) grid.append(card(t, t === best, list));
+      sec.append(el("div", { class: "sethead", style: "margin-top:6px" },
+        el("span", { class: "tag" }, sys === "none" ? "no aspect (PAL + NTSC)" : sys.toUpperCase())), grid);
+    }
+    box.append(sec);
+  }
+}
+
+function seg(values, cur, onpick, labels = {}) {
+  return el("span", { class: "seg" }, values.map(v =>
+    el("button", { class: v === cur ? "on" : "", onclick: () => onpick(v) }, labels[v] || v)));
+}
+
+function picture(t, which, maxW, maxH) {
+  const d = picDims(t, which);
+  const W = d.w * d.par, s = Math.min(maxW / W, maxH / d.h);
+  return el("img", { src: viewSrc(t, which), alt: t.setting, loading: "lazy",
+    style: `width:${W * s}px;height:${d.h * s}px` });
+}
+
+function card(t, best, list) {
+  const c = el("div", { class: "card" + (best ? " best" : "") });
+  if (t.state === "working") {
+    c.append(el("div", { class: "working" }, el("span", { class: "spin" }), ` ${t.setting}`));
+    return c;
+  }
+  if (t.state === "error") {
+    c.append(el("div", { class: "body" }, el("div", { class: "name" }, t.setting),
+      el("div", { class: "err" }, t.error)));
+    return c;
+  }
+  const r = t.result;
+  const which = VIEW === "estimate" && !t.result ? "quantised" : VIEW;
+  const conv = Object.values(JOB.tasks).filter(x => x.kind === "convert" && x.gid === t.gid);
+  const busy = conv.some(x => x.state === "working");
+  c.append(
+    el("div", { class: "pic", onclick: () => openLightbox(list, list.indexOf(t)) },
+      picture(t, which, 300, 212),
+      best ? el("span", { class: "badge" }, "best") : null,
+      el("span", { class: "sys" }, `${r.w}×${r.h}${t.mc ? " wide" : ""}`)),
+    el("div", { class: "body" },
+      el("div", { class: "name" }, el("span", {}, t.setting),
+        el("span", { class: "hint" }, t.score !== undefined ? "score " + t.score.toFixed(2) : "")),
+      t.score !== undefined ? el("div", { class: "scorebar" }, el("div", { style: `width:${t.score * 100}%` })) : null,
+      el("div", { class: "metrics" },
+        el("span", {}, "ssim", el("b", {}, r.ssim.toFixed(3))),
+        el("span", {}, "colour", el("b", {}, r.color.toFixed(2))),
+        el("span", {}, "rms", el("b", {}, r.rms.toFixed(2))),
+        el("span", { title: "pixels the estimate cannot show" }, "wrong≈",
+          el("b", {}, r.wrong === null ? "–" : pct(r.wrong, r.pixels)))),
+      el("div", { class: "acts" },
+        el("button", { class: "small primary", disabled: busy,
+          title: "run the converter on this dither's PAL and NTSC pictures (as quantised) and build one PRG",
+          onclick: () => convert(t.key) },
+          busy ? [el("span", { class: "spin" }), " converting"] : (conv.length ? "Convert again" : "Convert")),
+        el("a", { class: "small", href: fileUrl(t.png, 1), title: "img2c64's PNG, with its settings and thumbnail" }, "PNG"))));
+  return c;
+}
+
+async function convert(cid) {
+  try { await api("/api/convert", { id: JOB.id, cid }); }
+  catch (e) { alert(e.message); return; }
+  await refresh();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+const RVIEW = {};
+function renderResults() {
+  const box = $("#results");
+  box.replaceChildren();
+  const byCid = new Map();
+  for (const t of Object.values(JOB.tasks))
+    if (t.kind === "convert" || t.kind === "prg") {
+      if (!byCid.has(t.gid)) byCid.set(t.gid, []);
+      byCid.get(t.gid).push(t);
+    }
+  if (byCid.size) box.append(el("h2", { style: "font-size:13px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:0 0 10px" }, "Conversions"));
+  const order = [...byCid.entries()].sort((a, b) =>
+    Math.max(...b[1].map(t => t.started)) - Math.max(...a[1].map(t => t.started)));
+  for (const [cid, ts] of order) {
+    const conv0 = ts.find(t => t.kind === "convert");
+    const cand = conv0 && JOB.tasks[conv0.cid];
+    if (!cand) continue;
+    const prg = ts.find(t => t.kind === "prg");
+    const convs = ts.filter(t => t.kind === "convert").sort((a, b) => a.system.localeCompare(b.system)).reverse();
+    const view = RVIEW[cid] || "screen";
+    const res = el("div", { class: "result" });
+    res.append(el("div", { class: "sethead" },
+      el("h3", {}, cand.setting), el("span", { class: "tag" }, optsLabel(cand)),
+      seg(["screen", "compare", "sprites", "quantised"], view, v => { RVIEW[cid] = v; render(); },
+        { screen: "C64 screen", compare: "Compare", sprites: "Sprites", quantised: "Quantised" }),
+      el("span", { style: "flex:1" }),
+      prg && prg.state === "done" ? el("a", { class: "small primary", href: fileUrl(prg.file, 1),
+        title: "the v2i demo: shows the picture, space returns to BASIC" },
+        `PRG (${prg.result.systems.slice().reverse().map(s => s.toUpperCase()).join(" + ")}, ${(prg.result.size / 1024).toFixed(1)}K)`) : null,
+      prg && prg.state === "working" ? el("span", { class: "hint" }, el("span", { class: "spin" }), " assembling") : null,
+      prg && prg.state === "done" && CFG.vice ? prg.result.systems.slice().reverse().map(s =>
+        el("button", { class: "small", title: "open the PRG in VICE (x64sc)",
+          onclick: () => api("/api/run", { id: JOB.id, gid: cid, system: s }).catch(e => alert(e.message)) },
+          "▶ VICE " + s.toUpperCase())) : null,
+      el("button", { class: "small", title: "remove from the page (the files stay)",
+        onclick: () => api("/api/forget", { id: JOB.id, keys: ts.map(t => t.key) }).then(refresh) }, "×")));
+    if (prg && prg.state === "error") res.append(el("div", { class: "err" }, "PRG: " + prg.error));
+    const cols = el("div", { class: "cols" });
+    for (const t of convs) cols.append(convView(t, JOB.tasks[t.cid] || cand, view));
+    res.append(cols);
+    box.append(res);
+  }
+}
+
+function convView(t, cand, view) {
+  const col = el("div");
+  const head = el("div", { class: "sethead", style: "margin:0 0 6px" }, el("span", { class: "tag" }, t.system.toUpperCase()));
+  col.append(head);
+  if (t.state === "working") {
+    col.append(el("div", { class: "working" }, el("span", { class: "spin" }),
+      ` converting (${Math.round(Date.now() / 1000 - t.started)} s)`), el("pre", { class: "log" }, t.log || ""));
+    return col;
+  }
+  if (t.state === "error") { col.append(el("div", { class: "err" }, t.error), el("pre", { class: "log" }, t.log || "")); return col; }
+  const r = t.result, dir = t.dir + "/";
+  const p = par(t.system);
+  let shown;
+  if (view === "screen") {
+    const inner = el("div", { class: "inner" },
+      el("img", { src: fileUrl(dir + (r.files.screen || r.files.expected)), style:
+        `left:${r.col0 * 8 / 320 * 100}%;top:${r.row0 * 8 / 200 * 100}%;width:${r.w / 320 * 100}%;height:${r.h / 200 * 100}%` }));
+    inner.style.aspectRatio = `${320 * p} / 200`;
+    shown = el("div", { class: "screen", style: "cursor:zoom-in", onclick: () => openResult(t, cand) }, inner);
+  } else {
+    const src = view === "quantised" ? fileUrl(cand.png) : fileUrl(dir + r.files[view]);
+    shown = el("div", { class: "screen", style: "padding:8px" }, el("img", { class: "full", src }));
+  }
+  col.append(shown,
+    el("div", { class: "stats" },
+      el("span", {}, "wrong ", el("b", {}, `${r.wrong_px} (${pct(r.wrong_px, r.pixels)})`)),
+      el("span", {}, "bad lines ", el("b", {}, `${r.bad_lines}/${r.h}`)),
+      el("span", {}, ".v2i ", el("b", {}, `${r.size} bytes`)),
+      el("span", {}, "at ", el("b", {}, `col ${r.col0}, row ${r.row0}`))),
+    el("div", { class: "acts", style: "display:flex;gap:6px;flex-wrap:wrap" },
+      el("a", { class: "small", href: fileUrl(dir + r.files.v2i, 1) }, ".v2i"),
+      el("a", { class: "small", href: fileUrl(cand.png, 1) }, "PNG"),
+      el("a", { class: "small", href: fileUrl(dir + (r.files.screen || r.files.expected), 1), title: "what the C64 shows, in the picture's palette" }, "screen.png"),
+      el("a", { class: "small", href: fileUrl(dir + r.files.expected, 1), title: "what the C64 shows, in Pepto colours (the build's model)" }, "expected.png"),
+      el("a", { class: "small", href: fileUrl(dir + r.files.compare, 1) }, "compare.png"),
+      el("a", { class: "small", href: fileUrl(dir + r.files.sprites, 1) }, "sprites.png"),
+      el("a", { class: "small", href: fileUrl(dir + r.files.thumb, 1) }, "thumb.png"),
+      el("a", { class: "small", href: fileUrl(dir + "log.txt"), target: "_blank" }, "log")));
+  return col;
+}
+
+// ---- lightbox -----------------------------------------------------------------------
+function initLightbox() {
+  $("#lbclose").onclick = closeLightbox;
+  $("#lbprev").onclick = () => step(-1);
+  $("#lbnext").onclick = () => step(1);
+  $("#lbzoom").onclick = e => { if (e.target.dataset.z) { LB.zoom = +e.target.dataset.z; drawLightbox(); } };
+  document.addEventListener("keydown", e => {
+    if (!$("#lb").classList.contains("on")) return;
+    if (e.key === "Escape") closeLightbox();
+    if (e.key === "ArrowLeft") step(-1);
+    if (e.key === "ArrowRight") step(1);
+    const views = LB.views();
+    if (/^[1-9]$/.test(e.key) && views[+e.key - 1]) { LB.view = views[+e.key - 1][0]; drawLightbox(); }
+  });
+}
+function step(d) {
+  if (LB.list.length < 2) return;
+  LB.i = (LB.i + d + LB.list.length) % LB.list.length;
+  drawLightbox();
+}
+function closeLightbox() { $("#lb").classList.remove("on"); }
+
+function openLightbox(list, i) {
+  LB.list = list.filter(t => t.state === "done");
+  LB.i = Math.max(0, LB.list.indexOf(list[i]));
+  LB.view = VIEW;
+  LB.views = () => [["quantised", "Quantised"], ["estimate", "C64 estimate"], ["source", "Source"],
+                    ["ab", "Source | quantised"]];
+  LB.draw = t => {
+    const z = LB.zoom;
+    if (LB.view === "ab") return abSlider(t, z);
+    const d = picDims(t, LB.view === "source" ? "quantised" : LB.view);  // source at the C64 picture's size
+    return el("img", { src: viewSrc(t, LB.view), style: `width:${d.w * d.par * z}px;height:${d.h * z}px` });
+  };
+  LB.title = t => `${t.setting} · ${(t.system || "no aspect").toUpperCase()} · ${optsLabel(t)}`;
+  $("#lb").classList.add("on");
+  drawLightbox();
+}
+function openResult(t, cand) {
+  const r = t.result, dir = t.dir + "/";
+  LB.list = [t]; LB.i = 0; LB.view = "expected";
+  LB.views = () => [["expected", "C64 screen"], ["quantised", "Quantised"], ["source", "Source"], ["ab", "Quantised | C64"],
+                    ["compare", "Compare"], ["sprites", "Sprites"]];
+  LB.draw = () => {
+    const z = LB.zoom, p = par(t.system);
+    const screen = fileUrl(dir + (r.files.screen || r.files.expected));
+    if (LB.view === "ab") return abSlider(cand, z, screen, fileUrl(cand.png));
+    if (LB.view === "compare" || LB.view === "sprites")
+      return el("img", { src: fileUrl(dir + r.files[LB.view]), style: `zoom:${z / 3}` });
+    const src = LB.view === "expected" ? screen : LB.view === "source" ? fileUrl("source.png") : fileUrl(cand.png);
+    return el("img", { src, style: `width:${r.w * p * z}px;height:${r.h * z}px` });
+  };
+  LB.title = () => `${cand.setting} converted · ${t.system.toUpperCase()} · ${r.wrong_px} wrong pixels`;
+  $("#lb").classList.add("on");
+  drawLightbox();
+}
+function abSlider(t, z, left, right) {
+  // left image over the right one, split where the pointer is
+  const d = picDims(t, "quantised");
+  const W = d.w * d.par * z, H = d.h * z;
+  const a = left || fileUrl("source.png"), b = right || fileUrl(t.png);
+  const top = el("div", { class: "top", style: `width:${W / 2}px` },
+    el("img", { src: a, style: `width:${W}px;height:${H}px` }));
+  const box = el("div", { class: "ab", style: `width:${W}px;height:${H}px` },
+    el("img", { src: b, style: `width:${W}px;height:${H}px` }), top);
+  box.addEventListener("pointermove", e => {
+    const x = Math.max(0, Math.min(W, e.clientX - box.getBoundingClientRect().left));
+    top.style.width = x + "px";
+  });
+  return box;
+}
+function drawLightbox() {
+  const t = LB.list[LB.i];
+  if (!t) return closeLightbox();
+  $("#lbtitle").textContent = LB.title(t) + (LB.list.length > 1 ? `  (${LB.i + 1}/${LB.list.length})` : "");
+  const views = LB.views();
+  $("#lbview").replaceChildren(...views.map(([v, n], i) => el("button", { class: v === LB.view ? "on" : "",
+    title: "key " + (i + 1), onclick: () => { LB.view = v; drawLightbox(); } }, n)));
+  for (const b of $("#lbzoom").children) b.classList.toggle("on", +b.dataset.z === LB.zoom);
+  $("#lbstage").replaceChildren(LB.draw(t));
+  $("#lbhint").textContent = "← → step through · 1–" + views.length + " views · pixels at the C64's aspect" +
+    (LB.view === "ab" ? " · move the pointer to slide" : "");
+}
+
+init().catch(e => { $("#empty").textContent = "Cannot reach the server: " + e.message; });
+</script>
+</body>
+</html>

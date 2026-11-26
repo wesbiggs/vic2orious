@@ -40,6 +40,16 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   (`demo_txt`/`demo_txt_n`, 0 = none; `DUAL=1` for two) in `build/prg/v2i/`, frame
   from the metadata, `--font` checked against the text's height; `--verify` needs the
   build's `<name>.json` beside each `.v2i` (`model`).
+- `vic2/web.py` + `vic2/web.html`: `python3 -m vic2.web` / `make web` (Nov 2026), a local
+  web interface (stdlib `http.server`, no new dependencies; 127.0.0.1:8064). Jobs in
+  `build/web/<id>/` (`job.json` keeps them across restarts): candidates quantised with
+  img2c64's functions (module loaded from `tools/img2c64.py`) per dither x system,
+  scored with `dither_pick.estimate`/`scores`, ranked in the page (`rank`'s formula);
+  Convert runs `build.convert_image` (centred) for a dither's PAL and NTSC candidates
+  and assembles `v2i-demo.s` (`DUAL=1` for both) as `vic2.prg` does. The work runs in a
+  process pool (`timing.set_standard`, `build.BUILD` are per process), assembly in a
+  pool of one (cl65 leaves objects in `asm/`). `_screen.png`: `_expected.png` in the
+  candidate's palette. Checked: its PRGs, hires and `-m`, 0 differing pixels in VICE.
 - `vic2/scroll.py`: one `.txt` -> `<name>.prg` (cwd, or `-o`): the scroll demo with only
   that text (`build_scroll(texts=..., area=(x, cells, top))`, no intro), `--font`,
   `--leading`, `--at C,R` (first line; row 24 = just below the screen), `--width N`

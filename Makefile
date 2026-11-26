@@ -43,6 +43,7 @@ LINES   ?=                      # prg: N|none, hybrid's line budget (img2c64 -l;
                                 #   8, none to turn it off; needs DITHER=hybrid)
 MC      ?=                      # prg: 1, multicolour picture (img2c64 -m; not with
                                 #   DITHER=hybrid)
+PORT    ?=                      # web: port of the web interface (default 8064)
 VIEWER  ?=                      # pictures: 1, add the viewer and the stories
 FILES   ?=                      # pictures: the .v2i files (default: all in the build
                                 #   directory, both with DUAL=1)
@@ -89,7 +90,7 @@ DISKIMG  = $$(ls $(B)/vic2orious.d81 2>/dev/null || echo $(B)/vic2orious.d64)
 DRIVE    = $$(test -e $(B)/vic2orious.d81 && echo -drive8type 1581) \
            $(if $(strip $(FAST)),+drive8truedrive -trapdevice8)
 
-.PHONY: all build convert verify run run-slideshow run-diskshow run-viewer run-ask run-v2i \
+.PHONY: web all build convert verify run run-slideshow run-diskshow run-viewer run-ask run-v2i \
         run-v2t run-scroll run-stream run-thumbs run-d64 pictures run-pictures prg scroll clean \
         help FORCE
 
@@ -184,6 +185,11 @@ prg:
 		$(if $(strip $(LINES)),-l $(strip $(LINES))) \
 		$(if $(strip $(MC)),-m) $(strip $(PIC))
 
+# the web interface on http://127.0.0.1:$(PORT)/ (python3 -m vic2.web): upload a picture,
+# compare dithers, hires and multicolour, convert, download PNG, .v2i and PRG
+web:
+	$(PYTHON) -m vic2.web $(if $(strip $(PORT)),--port $(strip $(PORT)))
+
 # one text (TXT=path.txt) -> <name>.prg here: the scroll demo with just that text, drawn
 # in FONT (python3 -m vic2.scroll)
 scroll:
@@ -212,6 +218,8 @@ help:
 	@echo "make run-v2t        run the v2t-only demo (text, KERNAL on, any key returns)"
 	@echo "make run-scroll     run the scroll demo (all stories on one page; cursor keys"
 	@echo "                    scroll it smoothly, space returns)"
+	@echo "make web           the web interface: upload a picture, compare dithers and"
+	@echo "                    modes, convert, download PNG, .v2i and PRG (PORT=8064)"
 	@echo "make run-stream     run the stream demo (the stories arrive as a byte stream, the"
 	@echo "                    C64 wraps and scrolls them; space returns)"
 	@echo "make run-d64        boot the disk (.d64, or .d81 when the images need it)"

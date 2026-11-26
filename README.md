@@ -145,6 +145,21 @@ Generated files go to `build/prg/` (`<name>-p.png` and `<name>-n.png` are 16-col
 `--run` (or `--run ntsc`) starts the generated program in VICE. Both images have to fit in one PRG
 (`$0801-$bfff`, about 46K together). Testing against a variety of images of differing types has not yet caused this to be exceeded, but it is theoretically possible; the converter will complain, and the workaround is to generate separate NTSC and PAL versions.
 
+### In the browser
+
+`python3 -m vic2.web` (or `make web`) starts a local web interface on
+<http://127.0.0.1:8064/> and opens it. Drop a picture on it, choose hires or multicolour,
+the aspect (PAL, NTSC or both), palette, chroma and size, and the dithers to try: each
+is quantised by img2c64 for each system and shown side by side, with what the C64
+would show by the quick estimate, its metrics against the source and a ranking
+(img2c64's `-w` weights, adjustable). Click a picture to compare it larger, with the
+source, at the C64's pixel aspect. **Convert** runs the converter on that dither's PAL
+and NTSC pictures and builds one PRG for both; the page then shows the screen the C64
+draws, the wrong pixels and the sprites, and offers the PNG, `.v2i`, PRG and the
+build's diagnostic images for download (and runs the PRG in VICE if `x64sc` is
+installed). An img2c64 PNG can be uploaded and converted as it is. Everything stays on
+this machine, in `build/web/`; `--port`, `--workers`, `--no-browser`.
+
 ## 2. Add text (optional)
 
 ![Example with accompanying text in custom font](docs/text-gaoler.png)
