@@ -88,7 +88,7 @@ function options() {
   const box = [field(form.maxw, 8, 320, 320, 8), field(form.maxh, 8, 200, 200, 8)];
   const at = form.place.value === "at" ? [field(form.col, 0, 39, 0), field(form.row, 0, 24, 0)] : null;
   return { mc: form.mode.value === "mc", dither: form.dither.value || null, chroma: +form.chroma.value,
-    weights: weights(), box, at, bare: form.bare.checked };
+    weights: weights(), box, at, bare: form.bare.checked, aspect: form.aspect.value === "none" ? "none" : "system" };
 }
 
 function setStatus(text, fraction, error = false) {

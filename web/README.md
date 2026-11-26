@@ -3,7 +3,9 @@
 A static page that does what `python3 -m vic2.prg PICTURE` does, in the visitor's
 browser: picks a dither per system, converts the picture for PAL and NTSC, packs both
 `.v2i` and builds the dual PRG. Nothing is uploaded and there is no server code, so any
-static host serves it (Cloudflare Pages or Workers static assets, GitHub Pages).
+static host serves it. `.github/workflows/pages.yml` publishes it on GitHub Pages
+(index.html, style.css and js/) whenever web/ changes on main; it needs Settings > Pages >
+Source set to "GitHub Actions" once.
 
     python3 -m http.server -d web 8000      # then open http://localhost:8000
 
@@ -64,6 +66,12 @@ in the last bits, so a near tie between two dithers could in principle go the ot
   in until the picture fits (the build would stop instead). `web/test/prg_e2e.mjs --at`
   checks it against `web/test/prg_at.py COLUMN,ROW`, vic2.prg with its conversions
   placed that way.
+- Aspect None (Advanced settings) is `img2c64 -a none`: the picture's pixels as they
+  are (in multicolour one pixel per wide pixel), for pictures made at C64 size. vic2.prg
+  has no option for it; `web/test/prg_e2e.mjs --aspect none` checks it against
+  `web/test/prg_aspect.py`, vic2.prg running img2c64 with `-a none`, given a `-d`: with
+  a picked dither img2c64 makes one PNG for both systems, judged as PAL, where the page
+  picks for each system.
 - "Leave out the thumbnail and metadata" writes .v2i files with flags bits 0 and 2 clear
   (docs/v2i-format.md), which the players and v2i.inc read; the build always writes both.
 - "Use this" under Compare the dithers converts that dither for both systems as `vic2.prg -d` does (from the candidates already made); `hybrid,l=6` and

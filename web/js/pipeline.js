@@ -12,6 +12,11 @@ import { dualPrg } from "./prg.js";
 
 const SUFFIX = { pal: "-p", ntsc: "-n" };
 
+// img2c64 -a none makes one PNG for both systems, without the -p/-n suffix, and its
+// settings say "aspect: none"
+const aspected = (system, aspect) => (aspect === "none" ? null : system);
+const imageName = (name, system, aspect) => name + (aspect === "none" ? "" : SUFFIX[system]) + ".png";
+
 /** The candidate for a dither given by name: one of the picker's (as the page offers them
  * from its ranking), or img2c64 -d's (hybrid with its line budget). */
 export function fixedCandidate(dither) {
@@ -25,7 +30,9 @@ export function fixedCandidate(dither) {
  * img: the photo ({width, height, data} RGB). source: its file name. Options: mc
  * (multicolour), dither (null: pick), chroma (img2c64 -c), weights (img2c64 -w, for the
  * pick), box (img2c64 -s: the largest [width, height]), at ([column, row] on the screen,
- * vic2.build --at; null: centred), bare (.v2i without thumbnail and metadata), run (see
+ * vic2.build --at; null: centred), bare (.v2i without thumbnail and metadata), aspect
+ * ("system": each system's pixel aspect, as vic2.prg; "none": img2c64 -a none, the
+ * picture's pixels as they are, for pictures made at C64 size), run (see
  * above), status(text, fraction) for progress, date for the metadata, by for its
  * "quantized by".
  * Returns {prg, name, source, opts, systems: {pal, ntsc}}; each system has v2i, rendered
@@ -35,7 +42,7 @@ export function fixedCandidate(dither) {
  * dither), candidates (every dither tried) and convs (conversions by setting).
  */
 export async function makePrg(img, source, { mc = false, dither = null, chroma = 1.0, weights = pick.WEIGHTS,
-  box = [img2c64.MAX_W, img2c64.MAX_H], at = null, bare = false, run, status = () => {}, date = new Date(),
+  box = [img2c64.MAX_W, img2c64.MAX_H], at = null, bare = false, aspect = "system", run, status = () => {}, date = new Date(),
   by = "vic2orious web" } = {}) {
   const name = source.replace(/^.*[\\/]/, "").replace(/\.[^.]*$/, "") || "picture";
   // progress: each light job counts 1, each conversion HEAVY, as they finish (or move)
@@ -55,7 +62,7 @@ export async function makePrg(img, source, { mc = false, dither = null, chroma =
   };
 
   report(stage);
-  const prep = await job("prepare", { img, mc, box });
+  const prep = await job("prepare", { img, mc, box, aspect });
 
   const auto = dither === null;
   const cands = auto ? pick.CANDIDATES.filter((c) => !(mc && c[1].startsWith("hybrid"))) : [fixedCandidate(dither)];
@@ -93,9 +100,9 @@ export async function makePrg(img, source, { mc = false, dither = null, chroma =
     report(stage);
     const conv = reuse || await job("convert", { system, idx: o.idx, w: o.w, h: o.h, mc, at }, HEAVY);
     const picked = auto ? pick.pickedText(ranked, cands.length, top, weights, by) : null;
-    const settings = img2c64.settings(source.replace(/^.*[\\/]/, ""), system, img2c64.parseDither(best.dither),
+    const settings = img2c64.settings(source.replace(/^.*[\\/]/, ""), aspected(system, aspect), img2c64.parseDither(best.dither),
       { box, chroma, runs: best.runs, picked, mc, by });
-    const v2i = pack(conv, { settings, thumb: prep[system].thumb, imageName: name + SUFFIX[system] + ".png", date, bare });
+    const v2i = pack(conv, { settings, thumb: prep[system].thumb, imageName: imageName(name, system, aspect), date, bare });
     systems[system] = {
       v2i, rendered: conv.rendered, w: conv.w, h: conv.h, at: conv.at, mc, wrong: conv.wrong,
       setting: best.setting, pick: auto ? best.setting : null, ranked, settings,
@@ -107,7 +114,7 @@ export async function makePrg(img, source, { mc = false, dither = null, chroma =
   }));
   status("Packing the PRG", 1);
   const prg = dualPrg(systems.pal.v2i, systems.ntsc.v2i);
-  return { prg, name, source, opts: { mc, chroma, box, at, bare, by }, systems };
+  return { prg, name, source, opts: { mc, chroma, box, at, bare, aspect, by }, systems };
 }
 
 /**
@@ -117,7 +124,7 @@ export async function makePrg(img, source, { mc = false, dither = null, chroma =
  * figures stay. Options: run, status, date as makePrg's.
  */
 export async function withDither(prev, setting, { run, status = () => {}, date = new Date() } = {}) {
-  const { mc, chroma, box, at, bare, by } = prev.opts;
+  const { mc, chroma, box, at, bare, aspect, by } = prev.opts;
   const progress = { pal: 0, ntsc: 0 };
   const report = () => status(`Converting with ${setting}`, (progress.pal + progress.ntsc) / 2);
   const systems = {};
@@ -133,9 +140,9 @@ export async function withDither(prev, setting, { run, status = () => {}, date =
     }
     progress[system] = 1;
     report();
-    const settings = img2c64.settings(prev.source.replace(/^.*[\\/]/, ""), system, img2c64.parseDither(o.dither),
+    const settings = img2c64.settings(prev.source.replace(/^.*[\\/]/, ""), aspected(system, aspect), img2c64.parseDither(o.dither),
       { box, chroma, runs: o.runs, picked: null, mc, by });
-    const v2i = pack(conv, { settings, thumb: p.thumb, imageName: prev.name + SUFFIX[system] + ".png", date, bare });
+    const v2i = pack(conv, { settings, thumb: p.thumb, imageName: imageName(prev.name, system, aspect), date, bare });
     systems[system] = Object.assign({}, p, {
       v2i, rendered: conv.rendered, w: conv.w, h: conv.h, at: conv.at, wrong: conv.wrong, setting, settings,
       samePlace: samePlace(conv.w, conv.h, mc, at), screen: undefined,

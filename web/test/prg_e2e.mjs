@@ -3,10 +3,13 @@
 // web/test/prep_golden.py's JSON (the picture as img2c64 loads it); the metadata's date
 // is left out of the comparison, the tool name is the Python's.
 //   node web/test/prg_e2e.mjs photo.json python.prg SOURCE-NAME [-m] [-d DITHER] [-c S] [-w R,S,C]
-//     [-s WxH] [--at COLUMN,ROW] [--then DITHER]
+//     [-s WxH] [--at COLUMN,ROW] [--aspect none] [--then DITHER]
 // --then: the page's Use: the picked result, then that dither of it (vic2.prg -d DITHER).
 // --at: the page's screen position; vic2.prg has none, so python.prg comes from a vic2.prg
 // whose conversions are placed as `vic2.build --at` places them.
+// --aspect none: the page's Aspect None; python.prg from web/test/prg_aspect.py (vic2.prg
+// with img2c64 -a none). With the page's own pick, -d is needed: img2c64 -a none picks one
+// dither for both systems (judged as PAL), the page one per system.
 import { readFileSync, writeFileSync } from "node:fs";
 import { Worker } from "node:worker_threads";
 import os from "node:os";
@@ -34,6 +37,7 @@ let r = await makePrg(img, source, {
   weights: opts.includes("-w") ? opts[opts.indexOf("-w") + 1].split(",").map(Number) : undefined,
   box: arg("-s") ? arg("-s").split("x").map(Number) : undefined,
   at: arg("--at") ? arg("--at").split(",").map(Number) : null,
+  aspect: arg("--aspect") || "system",
   mc: opts.includes("-m"), chroma: opts.includes("-c") ? +opts[opts.indexOf("-c") + 1] : 1.0, dither: opts.includes("-d") ? opts[opts.indexOf("-d") + 1] : null,
   run: (type, payload, onProgress) => pool.run(type, payload, onProgress),
   status: (text, f) => { if (text !== lastText) { console.log(`  ${((Date.now() - t) / 1000).toFixed(1)} s ${text} (${Math.round(f * 100)}%)`); lastText = text; } },

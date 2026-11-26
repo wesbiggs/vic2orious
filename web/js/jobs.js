@@ -13,11 +13,13 @@ const sized = (img, w, h) => (img.width === w && img.height === h ? img : resize
 
 /** Everything that needs the whole photo, per system: the picture fitted to the screen
  * (what every dither starts from), the photo at the size of what the C64 shows (what
- * each result is scored against) and the thumbnail. */
-export function prepare({ img, mc = false, box = [img2c64.MAX_W, img2c64.MAX_H] }) {
+ * each result is scored against) and the thumbnail. aspect "none" (img2c64 -a none):
+ * the picture's pixels are the C64's as they are, not stretched for the system's pixel
+ * aspect (in multicolour, wide pixels). */
+export function prepare({ img, mc = false, box = [img2c64.MAX_W, img2c64.MAX_H], aspect = "system" }) {
   const out = {};
   for (const system of SYSTEMS) {
-    const [w, h] = img2c64.targetSize(img.width, img.height, system, false, box, mc);
+    const [w, h] = img2c64.targetSize(img.width, img.height, aspect === "none" ? null : system, false, box, mc);
     out[system] = {
       w, h,
       fitted: sized(img, w, h),

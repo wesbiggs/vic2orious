@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>vic2orious</title>
-<meta name="description" content="Turn a picture into a Commodore 64 program: a hires bitmap with sprites multiplexed on every line, for PAL and NTSC, made in your browser.">
+<meta name="description" content="Turn a picture into a Commodore 64 program with more colour than its graphics modes allow: a bitmap with sprites recoloured on every line, for PAL and NTSC, made in your browser.">
 <link rel="stylesheet" href="style.css">
 <script type="module" src="js/app.js"></script>
 </head>
@@ -12,8 +12,19 @@
 <main>
   <header>
     <h1>vic2orious</h1>
-    <p class="lede">Turn a picture into a C64 program. Drop a photo and get a PRG that shows
-      it on a real Commodore 64 or in an emulator, PAL or NTSC.</p>
+    <p class="lede">Turn a picture into a C64 program with more colour than the C64's
+      graphics modes allow. Drop a photo and get a PRG that shows it on a real Commodore 64
+      or in an emulator, PAL or NTSC.</p>
+    <p class="intro">Most C64 picture converters work within the screen's own modes: two colours in each
+      8×8 cell in hires, four in multicolour, so wherever a cell's pixels want more, the
+      detail goes to the nearest pair or four. vic2orious keeps the bitmap and adds the
+      colours that don't fit with the C64's eight sprites, moved and recoloured on every
+      line as the screen is drawn, and it chooses each cell's own colours with what the
+      sprites can cover in mind. It then tries several dithers on your picture, including
+      ones made to leave the sprites less to place, and keeps the one whose C64 version
+      comes closest to the original, separately for PAL and NTSC. Where a line needs more
+      than the sprites can give, a few pixels take a nearby colour, and the page says how
+      many.</p>
   </header>
 
   <section class="input">
@@ -63,6 +74,15 @@
               <label>Height <input type="number" name="maxh" min="8" max="200" step="8" value="200"></label>
             </span>
             <small>Screen pixels, in steps of 8. The picture keeps its shape inside them.</small>
+          </fieldset>
+          <fieldset>
+            <legend>Aspect</legend>
+            <label><input type="radio" name="aspect" value="system" checked> PAL and NTSC
+              <small>Stretched so it keeps its shape on each system's screen</small></label>
+            <label><input type="radio" name="aspect" value="none"> None
+              <small>The picture's pixels as they are, for pictures made at C64 size:
+                320×200 in hires, 160×200 in multicolour (one pixel for each wide pixel),
+                or a multiple of either</small></label>
           </fieldset>
           <fieldset>
             <legend>Screen position</legend>
