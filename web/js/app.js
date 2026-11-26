@@ -117,6 +117,7 @@ async function convert() {
       status: (text, f) => { if (last === run) setStatus(text + "…", f); },
     });
     if (last !== run) return;
+    busy = false;                   // before show(), which draws the Use this buttons
     r.original = shownOriginal;
     result = r;
     const secs = Math.round((performance.now() - t0) / 1000);
