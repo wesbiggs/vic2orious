@@ -2,6 +2,11 @@
 
 One-off measurements of the converter. They are not part of the build.
 
+They were written against the converter's Python version (`vic2/convert.py`,
+`vic2/timing.py`, `vic2/dither_pick.py`), which the JavaScript in `web/js` has since
+replaced byte for byte. To run one, check out the last commit that has those files
+(`git log -1 -- vic2/convert.py`, then its parent) or v0.1.0, or port it to `web/js`.
+
 ## Requirements
 
 - Everything the build needs: Python 3 with Pillow, and the `vic2` package from this repo.

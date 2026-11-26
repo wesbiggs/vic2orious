@@ -23,7 +23,7 @@ import sys
 from .build import (DISKS, ROOT, SUFFIX, V2I_VERSION, blocks, dual_base, text_disk_name,
                     v2i_disk_name)
 
-STANDARDS = {0: "pal", 1: "ntsc"}      # .v2i header byte 24 (timing.SYSTEM_ID)
+STANDARDS = {0: "pal", 1: "ntsc"}      # .v2i header byte 24 (engine.SYSTEM_ID)
 
 
 def system_of(path):

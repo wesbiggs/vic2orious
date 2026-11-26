@@ -1,6 +1,6 @@
 // A photo to a PRG through the page's pipeline and worker pool (in worker threads),
 // compared with the PRG `python3 -m vic2.prg` made of the same photo. The photo comes as
-// web/test/prep_golden.py's JSON (the picture as img2c64 loads it); the metadata's date
+// web/test/picture.py's JSON (the picture as img2c64 loads it); the metadata's date
 // is left out of the comparison, the tool name is the Python's.
 //   node web/test/prg_e2e.mjs photo.json python.prg SOURCE-NAME [-m] [-d DITHER] [-c S] [-w R,S,C]
 //     [-s WxH] [--at COLUMN,ROW] [--aspect none] [--then DITHER]

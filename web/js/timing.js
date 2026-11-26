@@ -1,6 +1,6 @@
-// Port of vic2/timing.py: the VIC-II bus model and the raster kernel generator. It must
-// make the same kernel as the Python byte for byte (web/test/golden.mjs checks), so it
-// follows the Python closely, ties and orders included; see that file for the details.
+// The VIC-II bus model and the raster kernel generator. Ported from vic2/timing.py, which
+// it replaced byte for byte, ties and orders included; `git log -- vic2/timing.py` finds
+// its last version, with the details in its comments.
 
 export const STANDARDS = {
   pal: { CYCLES: 63, LINES: 312, SPR_P: [58, 60, 62, 1, 3, 5, 7, 9], Y_AFTER: 57, FPS: 50 },

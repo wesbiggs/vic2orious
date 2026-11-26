@@ -27,6 +27,9 @@ get closer to pixel perfect.
 ## Requirements
 
 - Python 3 with [Pillow](https://pypi.org/project/pillow/)
+- [Node.js](https://nodejs.org/) 18 or later (`node`, or set `NODE`): the converter and
+  img2c64's dithers are the JavaScript the web tool runs (`web/js`), and the Python
+  tools run it in Node. No npm packages.
 - [cc65](https://cc65.github.io/) (`cl65`)
 - [VICE](https://vice-emu.sourceforge.io/) (`x64sc`, `c1541`). The build reads the
   character ROM from VICE's C64 data directory: `$VICE_DATA` if set, else the first of

@@ -1,10 +1,8 @@
-// Port of vic2/dither_pick.py and img2c64's picker (judge, candidate, refine, pick): which
-// dither gives the C64 picture closest to the source.
-//
-// The metrics follow the Python's arithmetic, but numpy's matrix products (BLAS) and its
-// exp, pow and cbrt can differ from JavaScript's in the last bits, so a score may differ
-// in its last digits and a near tie can go the other way. The pictures themselves (each
-// candidate's dither and conversion) are the Python's exactly.
+// img2c64's dither picker (judge, candidate, refine, pick): which dither gives the C64
+// picture closest to the source. Ported from vic2/dither_pick.py and tools/img2c64.py,
+// whose numpy arithmetic it follows; numpy's matrix products (BLAS) and its exp, pow and
+// cbrt could differ in the last bits, so a near tie between two dithers can go the other
+// way than the Python's did.
 
 import * as timing from "./timing.js";
 import { Converter, resetCaches } from "./convert.js";

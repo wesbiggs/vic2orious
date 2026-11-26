@@ -78,7 +78,7 @@ src      = $(firstword $(wildcard $(basename $(2))$(SFX_$(1)).png) $(2))
 txtsrc   = $(firstword $(wildcard $(basename $(2))$(SFX_$(1))$(3)) $(basename $(2))$(3))
 jsons    = $(foreach p,$(PNGS),$(DIR_$(1))/$(basename $(notdir $(p))).json)
 JSONS   := $(foreach s,$(SYSTEMS),$(call jsons,$(s)))
-SOURCES := $(wildcard input/* vic2/*.py asm/*) $(FONTFILE)
+SOURCES := $(wildcard input/* vic2/*.py web/js/*.js tools/engine*.mjs asm/*) $(FONTFILE)
 STAMP   := $(B)/.built
 
 # the disk the build made (.d64 or .d81) and the drive VICE needs for it (FAST=1: no true
@@ -97,13 +97,13 @@ build: $(STAMP)
 
 # step 1: convert each image on its own, for each system (build/pal/<name>.json and
 # build/ntsc/<name>.json record the results; make -j converts several at once). The
-# build skips images whose result is still valid, so touching vic2/*.py only reconverts
+# build skips images whose result is still valid, so touching vic2/*.py or web/js only reconverts
 # when a converter source really changed.
 convert: $(JSONS)
 
 define system_rules
 $(foreach p,$(PNGS),$(eval $(DIR_$(1))/$(basename $(notdir $(p))).json: $(call src,$(1),$(p)) $(wildcard $(call txtsrc,$(1),$(p),.txt) $(call txtsrc,$(1),$(p),.ask))))
-$(call jsons,$(1)): $(wildcard vic2/*.py) $(FONTFILE) $(DIR_$(1))/.copts
+$(call jsons,$(1)): $(wildcard vic2/*.py web/js/*.js tools/engine*.mjs) $(FONTFILE) $(DIR_$(1))/.copts
 	$(PYTHON) -m vic2.build --convert-only $(COPTS_$(1)) $$(filter %.png,$$^)
 endef
 $(foreach s,pal ntsc,$(eval $(call system_rules,$(s))))

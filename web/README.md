@@ -17,38 +17,38 @@ ES modules and module workers need the page served over HTTP, not opened as a fi
 - `js/pipeline.js`: vic2.prg's flow; `js/jobs.js`: its steps as plain functions;
   `js/pool.js`, `js/worker.js`: web workers that run them (one fewer than the CPU's
   cores, at most 8).
-- Ports of the Python, kept to the same arithmetic, ties and orders so the results are
-  the same bytes:
-  - `js/timing.js`, `js/convert.js`: `vic2/timing.py`, `vic2/convert.py`
-  - `js/imaging.js`: the parts of Pillow 12.3 that img2c64 uses (LANCZOS and BOX resize,
-    quantize with and without Floyd-Steinberg, ImageEnhance.Color, BoxBlur)
-  - `js/img2c64.js`, `js/thumb.js`: `tools/img2c64.py`'s preparation, `vic2/thumb.py`
-  - `js/pick.js`: `vic2/dither_pick.py` and img2c64's picker
-  - `js/v2i.js`: `vic2/build.py`'s `convert_new` (.v2i version 6)
+- The engine, which the Python tools run too (`vic2/engine.py` starts
+  `node tools/engine.mjs`), so the page and `vic2.prg` make the same bytes. Ported from
+  the Python, which it replaced, keeping its arithmetic, ties and orders:
+  - `js/timing.js`, `js/convert.js`: the bus model, the kernel and the converter
+  - `js/imaging.js`: the parts of Pillow 13.0 that img2c64 uses (LANCZOS and BOX resize,
+    with Pillow 13's choice of which pass goes first; quantize with and without
+    Floyd-Steinberg, ImageEnhance.Color, BoxBlur)
+  - `js/img2c64.js`, `js/thumb.js`: img2c64's preparation, thumbnails
+  - `js/pick.js`: img2c64's dither picker
+  - `js/v2i.js`: the build's `convert_new` (.v2i version 6)
   - `js/prg.js` with `js/prg-template.js`: the dual v2i demo with two images after it
-- `js/version.js` is `vic2.VERSION`; bump it with the Python's.
+- `js/version.js` is the version (`vic2.VERSION` reads it).
 
 `js/prg-template.js` is generated from `asm/v2i-demo.s`; after changing the demo or
 `asm/v2i.inc`, run (needs cc65 and the C64 character ROM, VICE_DATA):
 
     python3 web/tools/prg_template.py
 
-## Checks against the Python
+## Checks
 
-Each writes the Python's results as JSON (or a PRG) and the `.mjs` compares the
-JavaScript's with them:
+The page and the Python tools run the same engine (these modules; the Python through
+`vic2/engine.py` and `tools/engine.mjs`), so the build's `--verify` in VICE checks it. Two
+checks remain for what only the page does:
 
-    python3 web/test/golden.py pal input/dragon.png ref.json && node web/test/golden.mjs ref.json
-    python3 web/test/prep_golden.py photo.jpg prep.json [-m] && node web/test/prep_golden.mjs prep.json
-    python3 web/test/pick_golden.py photo.jpg pick.json [-m] && node web/test/pick_golden.mjs pick.json
-    python3 web/test/v2i_golden.py pal pic-p.png v.json && node web/test/v2i_golden.mjs v.json
-    python3 -m vic2.prg -o ref.prg photo.jpg && node web/test/prg_e2e.mjs prep.json ref.prg photo.jpg
+    python3 web/test/prg_golden.py pal.v2i ntsc.v2i ref.prg && node web/test/prg_golden.mjs pal.v2i ntsc.v2i ref.prg
+    python3 web/test/picture.py photo.jpg photo.json && python3 -m vic2.prg -o ref.prg photo.jpg &&
+        node web/test/prg_e2e.mjs photo.json ref.prg photo.jpg
         [-m] [-d DITHER] [-c S] [-w R,S,C] [-s WxH]   # as given to vic2.prg (-d hybrid,l=6 for -d hybrid -l 6)
 
-The last runs the page's pipeline in worker threads and compares the whole PRG (apart
-from the conversion dates in the metadata). The picker's scores match to about the last
-digit: numpy's sums are followed, but its matrix products and exp, pow and cbrt can differ
-in the last bits, so a near tie between two dithers could in principle go the other way.
+The first compares `prg.js`'s dual PRG with the one cc65 assembles from two `.v2i`; the
+second runs the page's pipeline in worker threads on the picture as img2c64 loads it and
+compares the whole PRG with `vic2.prg`'s (apart from the conversion dates in the metadata).
 
 ## Differences from vic2.prg
 
