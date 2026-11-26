@@ -15,6 +15,8 @@ BANK    ?=                      # 1, 2 or 3: the VIC bank the programs show imag
 AT      ?=                      # COLUMN,ROW: place the images there (build --at; default:
                                 #    upper left with a text, else centred)
 LEADING ?=                      # pixel lines between text lines (default 2)
+WIDTH   ?=                      # make scroll: text width in cells (AT: its first line)
+AUTOSCROLL ?=                   # make scroll: down by itself, 1 pixel every N frames
 FONT    ?=                      # FILE.cvt[:SIZE]: GEOS font for the texts (build --font;
                                 #    default: the character ROM's)
 AUTO    ?=                      # frames per slideshow image (default 250, 0: until space)
@@ -88,7 +90,7 @@ DRIVE    = $$(test -e $(B)/vic2orious.d81 && echo -drive8type 1581) \
            $(if $(strip $(FAST)),+drive8truedrive -trapdevice8)
 
 .PHONY: all build convert verify run run-slideshow run-diskshow run-viewer run-ask run-v2i \
-        run-v2t run-scroll run-stream run-thumbs run-d64 pictures run-pictures prg clean \
+        run-v2t run-scroll run-stream run-thumbs run-d64 pictures run-pictures prg scroll clean \
         help FORCE
 
 all: build
@@ -182,6 +184,16 @@ prg:
 		$(if $(strip $(LINES)),-l $(strip $(LINES))) \
 		$(if $(strip $(MC)),-m) $(strip $(PIC))
 
+# one text (TXT=path.txt) -> <name>.prg here: the scroll demo with just that text, drawn
+# in FONT (python3 -m vic2.scroll)
+scroll:
+	$(if $(strip $(TXT)),,$(error scroll needs TXT=path/to/text.txt))
+	$(PYTHON) -m vic2.scroll $(if $(strip $(FONT)),--font $(strip $(FONT))) \
+		$(if $(strip $(LEADING)),--leading $(strip $(LEADING))) \
+		$(if $(strip $(AT)),--at $(strip $(AT))) \
+		$(if $(strip $(WIDTH)),--width $(strip $(WIDTH))) \
+		$(if $(strip $(AUTOSCROLL)),--autoscroll $(strip $(AUTOSCROLL))) $(strip $(TXT))
+
 clean:
 	rm -rf build
 
@@ -218,6 +230,10 @@ help:
 	@echo "make prg PIC='x.v2i x.v2t'  a built image (and its text) -> x.prg, no"
 	@echo "                    conversion; FONT as in the build that laid the text out; two"
 	@echo "                    .v2i (PAL and NTSC, each followed by its text): one dual PRG"
+	@echo "make scroll TXT=x.txt  one text -> x.prg here: the scroll demo with only that"
+	@echo "                    text (PAL and NTSC; FONT, LEADING; python3 -m vic2.scroll);"
+	@echo "                    AT=COLUMN,ROW (first line, default 1,1), WIDTH=N (cells),"
+	@echo "                    AUTOSCROLL=N (down by itself, 1 pixel every N frames)"
 	@echo "make clean          remove build/ (PAL, NTSC and dual builds)"
 	@echo "options: IMAGES='input/a.png ...' FRAME=1 AT=COLUMN,ROW LEADING=n AUTO=n HOLD=n DISK=d64|d81"
 	@echo "         FONT=fonts/NAME.cvt[:SIZE] (GEOS font for the texts; bring your own)"
