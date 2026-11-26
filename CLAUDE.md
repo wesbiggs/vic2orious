@@ -40,6 +40,12 @@ The C64 side is two independent libraries, `asm/v2i.inc` (images) and `asm/v2t.i
   (`demo_txt`/`demo_txt_n`, 0 = none; `DUAL=1` for two) in `build/prg/v2i/`, frame
   from the metadata, `--font` checked against the text's height; `--verify` needs the
   build's `<name>.json` beside each `.v2i` (`model`).
+- `vic2/scroll.py`: one `.txt` -> `<name>.prg` (cwd, or `-o`): the scroll demo with only
+  that text (`build_scroll(texts=..., area=(x, cells, top))`, no intro), `--font`,
+  `--leading`, `--at C,R` (first line; row 24 = just below the screen), `--width N`
+  (cells), `--autoscroll N` (`AUTOSCROLL=N` in `scroll.s`: down one pixel every N frames
+  while no key is held), intermediates in `build/scroll/`; `make scroll TXT=path [FONT=]
+  [LEADING=] [AT=] [WIDTH=] [AUTOSCROLL=]`. Runs on PAL and NTSC.
 - `vic2/dither_pick.py`: the dither recommender's metrics (blurred RMS, SSIM of the
   luma, a*b* colour error), `rank`, `CANDIDATES`, `shown` (through the converter) and
   `estimate` (img2c64 `-t`: top-2 colours per cell, one exact cover per line as if every
