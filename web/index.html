@@ -44,6 +44,10 @@
           <option value="hybrid" data-hires>Hybrid (hires only)</option>
         </select>
       </label>
+      <label class="chroma">Colour matching <output id="chroma-value">1.00</output>
+        <input type="range" name="chroma" min="0.5" max="1.5" step="0.05" value="1">
+        <small>Lower uses more colour, higher more greys</small>
+      </label>
       <button id="again" type="submit" hidden>Convert again</button>
     </form>
   </section>
@@ -59,6 +63,14 @@
       <button role="tab" data-system="ntsc" aria-selected="false">NTSC</button>
     </div>
     <canvas id="screen" width="1280" height="800" aria-label="The picture as the C64 shows it"></canvas>
+    <div class="compare">
+      <label for="split">C64</label>
+      <input id="split" type="range" min="0" max="1" step="0.001" value="0"
+        aria-label="Slide to show the original picture over the C64 one">
+      <label for="split">Original</label>
+      <button id="full" type="button">Full screen</button>
+      <button id="png" type="button">Save as PNG</button>
+    </div>
     <p id="stats" class="stats"></p>
     <p class="download"><a id="prg" class="button" download>Download</a>
       <span class="files">or the images alone for vic2orious's players:
@@ -73,7 +85,8 @@
       <summary>How the dither was picked</summary>
       <p>Each dither is tried on the picture, and what the C64 would show is scored against
         the photo for structure (SSIM) and colour. In hires, a quick estimate picks the
-        best three for the full conversion; these are listed here.</p>
+        best three for the full conversion; these are listed here. Use converts the
+        picture again with that dither, for PAL and NTSC.</p>
       <table id="ranking"></table>
     </details>
   </section>

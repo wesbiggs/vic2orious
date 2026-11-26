@@ -11,21 +11,24 @@ import { dualPrg } from "./prg.js";
 
 const SUFFIX = { pal: "-p", ntsc: "-n" };
 
-/** The candidate for a dither given by name (img2c64 -d; hybrid with its line budget). */
+/** The candidate for a dither given by name: one of the picker's (as the page offers them
+ * from its ranking), or img2c64 -d's (hybrid with its line budget). */
 export function fixedCandidate(dither) {
+  const known = pick.CANDIDATES.find((c) => c[0] === dither);
+  if (known) return known;
   const [mode] = img2c64.parseDither(dither);
   return [dither, dither, mode === "hybrid" ? img2c64.HYBRID_RUNS : null];
 }
 
 /**
  * img: the photo ({width, height, data} RGB). source: its file name. Options: mc
- * (multicolour), dither (null: pick), run (see above), status(text, fraction) for
+ * (multicolour), dither (null: pick), chroma (img2c64 -c), run (see above), status(text, fraction) for
  * progress, date for the metadata, by for its "quantized by".
  * Returns {prg, name, systems: {pal, ntsc}}; each system has v2i, rendered (rows of
  * palette indices as the C64 shows them), w, h, mc, wrong, setting (the dither) and
  * ranked (the picker's results, best first; null with a given dither).
  */
-export async function makePrg(img, source, { mc = false, dither = null, run, status = () => {}, date = new Date(), by = "vic2orious web" } = {}) {
+export async function makePrg(img, source, { mc = false, dither = null, chroma = 1.0, run, status = () => {}, date = new Date(), by = "vic2orious web" } = {}) {
   const box = [img2c64.MAX_W, img2c64.MAX_H];
   const name = source.replace(/^.*[\\/]/, "").replace(/\.[^.]*$/, "") || "picture";
   // progress: each light job counts 1, each conversion HEAVY, as they finish (or move)
@@ -56,7 +59,7 @@ export async function makePrg(img, source, { mc = false, dither = null, run, sta
   total += 2 * cands.length + 2 * top * HEAVY + 2 * HEAVY;
   stage = auto ? `Trying ${cands.length} dithers` : "Dithering";
   const first = await Promise.all(SYSTEMS.map((system) => Promise.all(cands.map((cand) => job("candidate", {
-    system, fitted: prep[system].fitted, ref: prep[system].ref, cand, mc, box, quick,
+    system, fitted: prep[system].fitted, ref: prep[system].ref, cand, mc, box, chroma, quick,
   })))));
 
   stage = top ? `Converting the best ${top} of each system` : "Converting";
@@ -84,7 +87,7 @@ export async function makePrg(img, source, { mc = false, dither = null, run, sta
     const conv = reuse || await job("convert", { system, idx: o.idx, w: o.w, h: o.h, mc }, HEAVY);
     const picked = auto ? pick.pickedText(ranked, cands.length, top, pick.WEIGHTS, by) : null;
     const settings = img2c64.settings(source.replace(/^.*[\\/]/, ""), system, img2c64.parseDither(best.dither),
-      { box, runs: best.runs, picked, mc, by });
+      { box, chroma, runs: best.runs, picked, mc, by });
     const v2i = pack(conv, { settings, thumb: prep[system].thumb, imageName: name + SUFFIX[system] + ".png", date });
     systems[system] = {
       v2i, rendered: conv.rendered, w: conv.w, h: conv.h, mc, wrong: conv.wrong,

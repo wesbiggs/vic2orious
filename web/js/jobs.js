@@ -29,8 +29,8 @@ export function prepare({ img, mc = false, box = [img2c64.MAX_W, img2c64.MAX_H] 
 }
 
 /** One dither: its indices and its scores (by the converter's estimate if quick). */
-export function candidate({ system, fitted, ref, cand, mc = false, box, quick }) {
-  const [r, out] = pick.candidate(fitted, system, cand, { mc, box, fitted: true }, quick, ref);
+export function candidate({ system, fitted, ref, cand, mc = false, box, chroma = 1.0, quick }) {
+  const [r, out] = pick.candidate(fitted, system, cand, { mc, box, chroma, fitted: true }, quick, ref);
   delete r.rows;
   return { result: r, idx: out.idx, w: out.width, h: out.height };
 }
