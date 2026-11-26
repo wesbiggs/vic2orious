@@ -92,29 +92,37 @@
         picks the PAL or NTSC version for the machine. Press space to go back to BASIC.</p>
     </details>
     <details id="every-box">
-      <summary>Every dither, with the figures</summary>
-      <p class="hint">Each dither is tried on the picture, and what the C64 would show is scored
-        against the photo for structure (SSIM), blurred RMS error and colour (a*b*) error; the
-        weights say how much each counts. In hires a quick estimate (each cell's two
-        commonest colours and 8 sprite spans a line, no timing) ranks all of them and the
-        best three go through the converter. Changing the weights ranks them again here;
-        Convert again picks with them.</p>
+      <summary>Compare the dithers</summary>
+      <p>Every dither below was tried on your picture and scored on how close the C64's
+        version comes to the original, and the page shows its pick. <b>Use this</b> converts
+        another one for PAL and NTSC, to show above and download instead.</p>
+      <p id="every-status" class="every-status" aria-live="polite"></p>
       <div class="every-bar">
         <span class="seg" id="every-view" role="group" aria-label="Show">
           <button type="button" data-view="quantised" aria-pressed="true">Dithered</button>
           <button type="button" data-view="estimate" aria-pressed="false">C64 estimate</button>
           <button type="button" data-view="original" aria-pressed="false">Original</button>
         </span>
+      </div>
+      <div id="grid" class="grid"></div>
+      <details class="figures">
+        <summary>How the scores work</summary>
+        <p class="hint">SSIM compares structure (higher is closer); colour is the a*b*
+          colour error and RMS the blurred error (lower is closer); nearby is the share of
+          pixels the C64 cannot show exactly and draws in a nearby colour. The score weighs
+          them against each other, 1 being the best of these dithers. In hires a quick
+          estimate (each cell's two commonest colours, 8 sprite spans a line, no timing)
+          scores all of them, and the best three by it are converted in full and scored
+          again, below; the page shows the best of those. Changing the weights scores them
+          again, and Convert again picks with them.</p>
         <span class="weights" id="weights">Weights
           <label>RMS <input type="number" name="w0" value="0" min="0" step="0.5"></label>
           <label>SSIM <input type="number" name="w1" value="1" min="0" step="0.5"></label>
           <label>Colour <input type="number" name="w2" value="1" min="0" step="0.5"></label>
         </span>
-      </div>
-      <h3 id="converted-head">Converted</h3>
-      <table id="ranking"></table>
-      <h3>Every dither, by the estimate</h3>
-      <div id="grid" class="grid"></div>
+        <h3 id="converted-head">Converted in full</h3>
+        <table id="ranking"></table>
+      </details>
     </details>
   </section>
 

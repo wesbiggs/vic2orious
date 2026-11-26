@@ -59,5 +59,5 @@ in the last bits, so a near tie between two dithers could in principle go the ot
   the page's "Colour matching", 0.5 to 1.5; weights (`-w`) are under "Every dither, with
   the figures", which also shows every dither tried (dithered, the estimate, the original)
   with its scores, ranked again as the weights change.
-- The ranking's Use button converts with that dither for both systems; `hybrid,l=6` and
+- "Use this" under Compare the dithers converts that dither for both systems as `vic2.prg -d` does (from the candidates already made); `hybrid,l=6` and
   `hybrid,l=none` there are `-d hybrid -l 6` and `-d hybrid -l none`.

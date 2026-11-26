@@ -25,9 +25,10 @@ export function fixedCandidate(dither) {
  * (multicolour), dither (null: pick), chroma (img2c64 -c), weights (img2c64 -w, for the
  * pick), run (see above), status(text, fraction) for
  * progress, date for the metadata, by for its "quantized by".
- * Returns {prg, name, systems: {pal, ntsc}}; each system has v2i, rendered (rows of
- * palette indices as the C64 shows them), w, h, mc, wrong, setting (the dither) and
- * ranked (the picker's results, best first; null with a given dither).
+ * Returns {prg, name, source, opts, systems: {pal, ntsc}}; each system has v2i, rendered
+ * (rows of palette indices as the C64 shows them), w, h, mc, wrong, setting (the dither),
+ * pick (the picker's choice), ranked (the picker's results, best first; null with a given
+ * dither), candidates (every dither tried) and convs (conversions by setting).
  */
 export async function makePrg(img, source, { mc = false, dither = null, chroma = 1.0, weights = pick.WEIGHTS, run, status = () => {}, date = new Date(), by = "vic2orious web" } = {}) {
   const box = [img2c64.MAX_W, img2c64.MAX_H];
@@ -92,12 +93,49 @@ export async function makePrg(img, source, { mc = false, dither = null, chroma =
     const v2i = pack(conv, { settings, thumb: prep[system].thumb, imageName: name + SUFFIX[system] + ".png", date });
     systems[system] = {
       v2i, rendered: conv.rendered, w: conv.w, h: conv.h, mc, wrong: conv.wrong,
-      setting: best.setting, ranked, settings, sameAsCentred: sameAsCentred(conv.w, conv.h, mc),
+      setting: best.setting, pick: auto ? best.setting : null, ranked, settings,
+      sameAsCentred: sameAsCentred(conv.w, conv.h, mc), thumb: prep[system].thumb,
       // every dither tried, by the estimate: its indices (w x h) and figures
       candidates: res.map((r) => Object.assign({}, r.result, { idx: r.idx, w: r.w, h: r.h })),
+      convs: new Map([[best.setting, conv]]),
     };
   }));
   status("Packing the PRG", 1);
   const prg = dualPrg(systems.pal.v2i, systems.ntsc.v2i);
-  return { prg, name, systems };
+  return { prg, name, source, opts: { mc, chroma, box, by }, systems };
+}
+
+/**
+ * An earlier result with another of its dithers, as `vic2.prg -d` makes it: the dither's
+ * indices come from the candidates the earlier run made of the same picture with the same
+ * options, so only the converter runs (and not at all for a dither converted before). The
+ * figures stay. Options: run, status, date as makePrg's.
+ */
+export async function withDither(prev, setting, { run, status = () => {}, date = new Date() } = {}) {
+  const { mc, chroma, box, by } = prev.opts;
+  const progress = { pal: 0, ntsc: 0 };
+  const report = () => status(`Converting with ${setting}`, (progress.pal + progress.ntsc) / 2);
+  const systems = {};
+  report();
+  await Promise.all(SYSTEMS.map(async (system) => {
+    const p = prev.systems[system];
+    const o = p.candidates.find((c) => c.setting === setting);
+    if (!o) throw new Error(`${setting}: not one of the dithers tried`);
+    let conv = p.convs.get(setting);
+    if (!conv) {
+      conv = await run("convert", { system, idx: o.idx, w: o.w, h: o.h, mc }, (f) => { progress[system] = f; report(); });
+      p.convs.set(setting, conv);
+    }
+    progress[system] = 1;
+    report();
+    const settings = img2c64.settings(prev.source.replace(/^.*[\\/]/, ""), system, img2c64.parseDither(o.dither),
+      { box, chroma, runs: o.runs, picked: null, mc, by });
+    const v2i = pack(conv, { settings, thumb: p.thumb, imageName: prev.name + SUFFIX[system] + ".png", date });
+    systems[system] = Object.assign({}, p, {
+      v2i, rendered: conv.rendered, w: conv.w, h: conv.h, wrong: conv.wrong, setting, settings,
+      sameAsCentred: sameAsCentred(conv.w, conv.h, mc), screen: undefined,
+    });
+  }));
+  status("Packing the PRG", 1);
+  return Object.assign({}, prev, { prg: dualPrg(systems.pal.v2i, systems.ntsc.v2i), systems });
 }

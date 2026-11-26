@@ -3,11 +3,13 @@
 // web/test/prep_golden.py's JSON (the picture as img2c64 loads it); the metadata's date
 // is left out of the comparison, the tool name is the Python's.
 //   node web/test/prg_e2e.mjs photo.json python.prg SOURCE-NAME [-m] [-d DITHER] [-c S] [-w R,S,C]
+//     [--then DITHER]
+// --then: the page's Use: the picked result, then that dither of it (vic2.prg -d DITHER).
 import { readFileSync, writeFileSync } from "node:fs";
 import { Worker } from "node:worker_threads";
 import os from "node:os";
 import { Pool } from "../js/pool.js";
-import { makePrg } from "../js/pipeline.js";
+import { makePrg, withDither } from "../js/pipeline.js";
 
 const [json, prgPath, source, ...opts] = process.argv.slice(2);
 const ref = JSON.parse(readFileSync(json, "utf8"));
@@ -25,13 +27,18 @@ const spawn = () => {
 const pool = new Pool(Math.max(1, Math.min(8, os.cpus().length - 1)), spawn);
 const t = Date.now();
 let lastText = "";
-const r = await makePrg(img, source, {
+let r = await makePrg(img, source, {
   weights: opts.includes("-w") ? opts[opts.indexOf("-w") + 1].split(",").map(Number) : undefined,
   mc: opts.includes("-m"), chroma: opts.includes("-c") ? +opts[opts.indexOf("-c") + 1] : 1.0, dither: opts.includes("-d") ? opts[opts.indexOf("-d") + 1] : null,
   run: (type, payload, onProgress) => pool.run(type, payload, onProgress),
   status: (text, f) => { if (text !== lastText) { console.log(`  ${((Date.now() - t) / 1000).toFixed(1)} s ${text} (${Math.round(f * 100)}%)`); lastText = text; } },
   date, by: "img2c64",
 });
+if (opts.includes("--then")) {
+  r = await withDither(r, opts[opts.indexOf("--then") + 1], {
+    run: (type, payload, onProgress) => pool.run(type, payload, onProgress), date,
+  });
+}
 pool.terminate();
 writeFileSync(prgPath.replace(/\.prg$/, "-js.prg"), r.prg);
 // each .v2i has the minute it was converted in: compare without them

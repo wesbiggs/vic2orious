@@ -121,7 +121,6 @@ tr.picked td { font-weight: 600; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
   display: flex; flex-direction: column; }
-.card.picked-card { border-color: var(--accent); }
 .card .pic { background: #000; position: relative; }
 .card canvas { display: block; width: 100%; height: auto; }
 .card .badge { position: absolute; top: 6px; left: 6px; background: var(--accent); color: var(--accent-fg);
@@ -134,3 +133,13 @@ tr.picked td { font-weight: 600; }
 .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; font-size: 0.75rem; color: var(--muted); }
 .metrics b { display: block; color: var(--fg); font-weight: 500; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
 .card button { align-self: flex-start; margin-top: auto; padding: 3px 12px; font-size: 0.85rem; }
+.every-status { font-weight: 600; min-height: 1.5em; margin: 8px 0; }
+.every-status button { margin-left: 8px; padding: 2px 10px; font-size: 0.85rem; font-weight: 500; }
+.card.shown-card { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.card.working .pic::after { content: ""; position: absolute; inset: 0; background: rgba(0, 0, 0, 0.45); }
+.card progress { width: 100%; height: 6px; }
+.card .acts { display: flex; align-items: center; gap: 8px; margin-top: auto; }
+.card .acts button { margin-top: 0; }
+.badge.pick { left: auto; right: 6px; background: var(--fg); color: var(--bg); }
+.figures { margin-top: 16px; }
+.figures .weights { margin: 8px 0; }

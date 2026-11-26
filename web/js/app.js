@@ -4,7 +4,7 @@
 
 import { fromRGBA } from "./imaging.js";
 import { Pool } from "./pool.js";
-import { makePrg } from "./pipeline.js";
+import { makePrg, withDither } from "./pipeline.js";
 import { VIEW, PAR } from "./img2c64.js";
 import { rank, WEIGHTS } from "./pick.js";
 
@@ -15,6 +15,7 @@ let pool = null, busy = false, last = null, file = null, result = null, shownSys
 let original = null;                // the picture last decoded (a canvas)
 let split = 0;                      // how much of the screen, from the left, the curtain covers
 let everyView = "quantised";        // what the cards show: quantised, estimate or original
+let using = null;                   // {setting, fraction}: a dither being converted by Use this
 const urls = [];
 
 function workers() {
@@ -96,8 +97,11 @@ async function convert() {
     pool = null;
   }
   busy = true;
+  using = null;
   const run = Symbol("run");
   last = run;
+  setEveryStatus("");
+  if (result) every();
   $("work").hidden = false;
   $("again").hidden = true;
   setStatus(`Reading ${file.name}`, 0);
@@ -136,7 +140,7 @@ function link(a, bytes, name) {
   a.download = name;
 }
 
-function show(r) {
+function show(r, keepSplit = false) {
   while (urls.length) URL.revokeObjectURL(urls.pop());
   const name = fileName(r.name);
   link($("prg"), r.prg, `${name}.prg`);
@@ -144,7 +148,7 @@ function show(r) {
   link($("v2i-pal"), r.systems.pal.v2i, `${name}-p.v2i`);
   link($("v2i-ntsc"), r.systems.ntsc.v2i, `${name}-n.v2i`);
   $("result").hidden = false;
-  split = 0;
+  if (!keepSplit) split = 0;
   draw(shownSystem);
 }
 
@@ -250,16 +254,56 @@ function savePng() {
   }, "image/png");
 }
 
-/** Convert again with a dither from the figures, for both systems. */
-function useDither(setting) {
-  const sel = $("options").dither;
-  if (![...sel.options].some((o) => o.value === setting)) {
-    const o = new Option(setting, setting);
-    if (setting.startsWith("hybrid")) o.dataset.hires = "";
-    sel.append(o);
+/** Another of the dithers tried, converted for PAL and NTSC, to show and download. */
+async function useDither(setting) {
+  if (!result || busy) return;
+  busy = true;
+  const run = Symbol("run");
+  last = run;
+  using = { setting, fraction: 0 };
+  const t0 = performance.now();
+  setEveryStatus(`Converting with ${setting} for PAL and NTSC…`);
+  every();
+  try {
+    if (!pool) pool = workers();
+    const r = await withDither(result, setting, {
+      run: (type, payload, onProgress) => pool.run(type, payload, onProgress),
+      status: (text, f) => { if (last === run && using) { using.fraction = f; cardProgress(); } },
+    });
+    if (last !== run) return;
+    busy = false;
+    using = null;
+    result = r;
+    show(r, true);
+    const secs = Math.round((performance.now() - t0) / 1000);
+    setStatus(`Converted with ${setting} in ${secs} s.`, 1);
+    setEveryStatus(`Now showing ${setting} above; the downloads are this one.`, true);
+  } catch (e) {
+    if (last !== run) return;
+    console.error(e);
+    busy = false;
+    using = null;
+    every();
+    setEveryStatus(`Could not convert with ${setting}: ${e.message}`);
   }
-  sel.value = setting;
-  convert();
+}
+
+function setEveryStatus(text, seeIt = false) {
+  const p = $("every-status");
+  p.replaceChildren(text);
+  if (seeIt) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = "See it";
+    b.addEventListener("click", () => $("result").scrollIntoView({ behavior: "smooth", block: "start" }));
+    p.append(b);
+  }
+}
+
+/** The progress of Use this on its card, without drawing the cards again. */
+function cardProgress() {
+  const bar = document.querySelector(`#grid .card[data-setting="${CSS.escape(using.setting)}"] progress`);
+  if (bar) bar.value = using.fraction;
 }
 
 // ------------------------------------------------------------- every dither, with figures
@@ -274,7 +318,7 @@ function ranked(s) {
   const w = weights();
   const all = rank(copy(s.candidates), w);
   let converted = null;
-  if (s.ranked) {
+  if (s.ranked && !s.mc) {
     const done = new Set(s.ranked.map((r) => r.setting));
     const extra = copy(all.filter((r) => !done.has(r.setting))).map((r) => Object.assign(r, { estimate: true }));
     converted = rank(copy(s.ranked).concat(extra), w).filter((r) => !r.estimate);
@@ -284,16 +328,22 @@ function ranked(s) {
 
 function useButton(setting, s) {
   if (setting === s.setting) return null;
+  const ready = SYSTEM_NAMES.every((y) => result.systems[y].convs.has(setting));
   const b = document.createElement("button");
   b.type = "button";
-  b.textContent = "Use";
-  b.title = `Convert again with ${setting} for PAL and NTSC`;
+  b.textContent = ready ? "Show this" : "Use this";
+  b.disabled = busy;
+  b.title = ready ? `Show ${setting} again (converted before)` : `Convert with ${setting} for PAL and NTSC and show it`;
   b.addEventListener("click", () => useDither(setting));
   return b;
 }
+const SYSTEM_NAMES = ["pal", "ntsc"];
 
 function every() {
   const s = result.systems[shownSystem];
+  if (s.candidates.length < 2 && !using) {
+    setEveryStatus("Only one dither was tried: choose Best of several above to compare them.");
+  }
   const { all, converted, done } = ranked(s);
   const table = $("ranking");
   $("converted-head").hidden = table.hidden = !converted;
@@ -320,7 +370,7 @@ function every() {
       row.insertCell().append(...(b ? [b] : []));
     }
   }
-  $("grid").replaceChildren(...all.map((r, i) => card(r, s, i === 0, done.has(r.setting))));
+  $("grid").replaceChildren(...all.map((r) => card(r, s, done.has(r.setting))));
 }
 
 function el(tag, cls, ...kids) {
@@ -330,7 +380,7 @@ function el(tag, cls, ...kids) {
   return e;
 }
 
-function card(r, s, best, wasConverted) {
+function card(r, s, wasConverted) {
   const scale = s.mc ? 2 : 1;
   const c = document.createElement("canvas");
   c.width = r.w * scale * 2; c.height = r.h * 2;
@@ -344,8 +394,17 @@ function card(r, s, best, wasConverted) {
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(pixels(rows, r.w, r.h, scale), 0, 0, c.width, c.height);
   }
-  const picked = r.setting === s.setting;
-  const badge = picked ? "picked" : best ? "best estimate" : wasConverted && !s.mc ? "converted" : null;
+  const shown = r.setting === s.setting, working = using && using.setting === r.setting;
+  const badge = shown ? "showing" : wasConverted && !s.mc ? "converted in full" : null;
+  let acts;
+  if (working) {
+    const bar = document.createElement("progress");
+    bar.max = 1;
+    bar.value = using.fraction;
+    acts = el("div", "acts", el("span", "hint", "Converting…"), bar);
+  } else {
+    acts = el("div", "acts", useButton(r.setting, s));
+  }
   const metric = (name, v, title) => {
     const m = el("span", null, name, el("b", null, v));
     if (title) m.title = title;
@@ -353,8 +412,9 @@ function card(r, s, best, wasConverted) {
   };
   const fill = el("div");
   fill.style.width = `${Math.round(100 * r.score)}%`;
-  return el("div", "card" + (picked ? " picked-card" : ""),
-    el("div", "pic", c, badge ? el("span", "badge", badge) : null),
+  const div = el("div", "card" + (shown ? " shown-card" : "") + (working ? " working" : ""),
+    el("div", "pic", c, badge ? el("span", "badge", badge) : null,
+      r.setting === s.pick ? el("span", "badge pick", "page's pick") : null),
     el("div", "body",
       el("div", "name", el("span", null, r.setting), el("span", null, `score ${fix(r.score, 2)}`)),
       el("div", "scorebar", fill),
@@ -363,7 +423,9 @@ function card(r, s, best, wasConverted) {
         metric("colour", fix(r.color, 2)),
         metric("RMS", fix(r.rms, 2)),
         metric("nearby", share(r), "pixels the estimate draws in a nearby colour")),
-      useButton(r.setting, s)));
+      acts));
+  div.dataset.setting = r.setting;
+  return div;
 }
 
 // ---------------------------------------------------------------------------- the page
