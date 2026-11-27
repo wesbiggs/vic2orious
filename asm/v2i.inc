@@ -511,7 +511,7 @@ v2i_badbank:
 ; ---- A/Y = a .v2i, or as much of it as its header, thumbnail and metadata: check magic
 ; and version, set the image info (v2i_cols .. v2i_mc), v2i_tptr (the thumbnail, 0 if
 ; none), v2i_mptr and v2i_mlen (the metadata text and its length, 0 if none), and
-; v2i_ptr (the kernel). C=1: not a version 5 .v2i, A = V2I_ERR_FORMAT
+; v2i_ptr (the kernel). C=1: not a version 6 .v2i, A = V2I_ERR_FORMAT
 v2i_ibad:
         jmp v2i_badfmt
 v2i_info:

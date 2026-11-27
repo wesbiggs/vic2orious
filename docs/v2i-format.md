@@ -43,7 +43,7 @@ Older versions: 3 (hires) and 4 (multicolour, flags bit 1) had the same header, 
 kernel right after it and the metadata (flags bit 0) at the end, after the sprite stream
 (and colour RAM stream); no thumbnails. Version 5 moved thumbnail and metadata to the
 front so they can be read alone, and has one version number for both modes; players
-(`v2i_show`) take version 5 only. Version 2 kernels were entered on raster line 2.
+(`v2i_show`) took version 5 only. Version 2 kernels were entered on raster line 2.
 Version 1 had no video system byte (always PAL) and a 24-byte header.
 
 Version 6 has the same header and streams, but the destinations are offsets in the VIC bank
