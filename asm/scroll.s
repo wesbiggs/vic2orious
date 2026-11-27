@@ -16,11 +16,17 @@
 ; AUTO_V2 by itself, and stays there. With AUTO=2 it asks for AUTO_N pixels down, one per
 ; frame (after 10 frames): it ends at page line AUTO_N only if preparing never made the
 ; scroll wait.
+;
+; With AUTOSCROLL=N (N > 0) it scrolls down by itself, one pixel every N frames, to the
+; end of the page; the keys still work, and override it while held.
 
         .include "scroll.inc"           ; generated: the page (lines, colours, row tables)
 
 .ifndef AUTO
 AUTO = 0
+.endif
+.ifndef AUTOSCROLL
+AUTOSCROLL = 0
 .endif
 
 BMP_A   = $6000
@@ -351,6 +357,8 @@ prow:   lda pb+1                        ; A = q = pb / 8 (q+1 high)
 irq:    asl $d019
 .if AUTO
         jsr script
+.elseif AUTOSCROLL
+        jsr input
 .else
         jsr keys
 .endif
@@ -488,6 +496,20 @@ script: jsr vpos                        ; down to AUTO_V1, then up to AUTO_V2
         rts
 phase:  .byte 0
 .else
+.if AUTOSCROLL
+input:  jsr keys                        ; a key, else down every AUTOSCROLL frames
+        bne @r
+        dec acnt
+        bne @z
+        lda #AUTOSCROLL
+        sta acnt
+        lda #1
+        rts
+@z:     lda #0
+@r:     rts
+acnt:   .byte AUTOSCROLL
+.endif
+
 ; A = 1: down, $ff: up, 0: neither. Space sets quit
 keys:   lda #$7f                        ; space: column 7, row 4
         sta $dc00
