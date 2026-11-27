@@ -32,7 +32,7 @@ import re
 import subprocess
 import sys
 
-from . import build, timing
+from . import build, engine
 from .build import V2I_VERSION
 
 TOOL = os.path.join(build.ROOT, "tools", "img2c64.py")
@@ -41,7 +41,7 @@ PRG_BUILD = os.path.join(build.ROOT, "build", "prg")
 
 def use_system(standard):
     """Like build.use_system, into build/prg/<standard>/ (apart from the input/ builds)."""
-    timing.set_standard(standard)
+    engine.set_standard(standard)
     build.BUILD = os.path.join(PRG_BUILD, standard)
     os.makedirs(build.BUILD, exist_ok=True)
 
@@ -125,7 +125,7 @@ def main():
     ok = True
     if a.verify:
         for std in ("pal", "ntsc"):
-            timing.set_standard(std)
+            engine.set_standard(std)
             ok &= build.check_in_vice(out, os.path.join(PRG_BUILD, "vice_%s_%s.png" % (name, std)),
                                       build.expected_screen(infos[std], text=False).pixels(),
                                       "%s on %s" % (name, std.upper()))
@@ -178,7 +178,7 @@ def model(v2i, txt):
             and os.path.exists(inf.get("expected_png", ""))):
         return None
     g = inf.pop("geom")
-    inf["geom"] = build.convert.Geometry(inf["w"], inf["h"], frame=g["frame"],
+    inf["geom"] = build.Geometry(inf["w"], inf["h"], frame=g["frame"],
                                          at=(g["col0"], g["row0"]), mc=g.get("mc", False))
     inf["expected"] = build.load_indexed(inf["expected_png"])[2]
     inf["txt"] = txt
@@ -250,7 +250,7 @@ def from_files(a):
                 print("  %s: no model (the build's .json beside it), not verified" % v2i)
                 ok = False
                 continue
-            timing.set_standard(std)
+            engine.set_standard(std)
             ok &= build.check_in_vice(out, os.path.join(build.BUILD, "vice_%s_%s.png" % (name, std)),
                                       build.expected_screen(inf).pixels(),
                                       "%s on %s" % (name, std.upper()))

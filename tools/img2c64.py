@@ -26,14 +26,13 @@ usage: python3 tools/img2c64.py [-a {both,pal,ntsc,none}] [-b] [-c S] [-P FILE.v
               atkinson:0.75, hybrid with -l 8, 6 and none), run each result through the
               converter and keep the one whose C64 picture is closest to the source, by
               these weights for the 3x3-blurred RMS error, SSIM and colour (a*b*) error
-              (default 0,1,1; vic2/dither_pick.py, analysis/README.md). Prints each
+              (default 0,1,1; web/js/pick.js, analysis/README.md). Prints each
               dither's metrics as it finishes (with wrong pixels and CPU time), then
-              the ranking and the pick. Takes the repo's vic2 package and numpy, and about 40 s
-              of CPU per dither and picture (the converter; run in parallel: about 50 s a
-              picture and system on 12 cores), so by default only the best 3 by a quick
-              estimate go through it (see -t).
+              the ranking and the pick. The converter takes the most time (each dither of
+              each picture in its own worker thread), so by default only the best 3 by a
+              quick estimate go through it (see -t).
   -t N        without -d: rank the dithers first by an estimate of the converter
-              (vic2/dither_pick.py estimate: each cell's two commonest colours, each line's
+              (web/js/pick.js estimate: each cell's two commonest colours, each line's
               other pixels covered by up to 8 spans as if every one fitted; about 0.1 s)
               and convert only the best N (default 3); all converts every one, as before
               (kodim13: the estimate's top two were the converter's, PAL and NTSC). Not
@@ -80,22 +79,26 @@ and records the settings (source name, aspect, fit, dither, chroma, palette) in 
 chunk "vic2orious"; the build copies them into the .v2i's metadata. It also holds a
 thumbnail (text chunk "vic2orious-thumb", hex): the picture shrunk into 24x21 pixels (as
 the C64 shows it: 24x15 for the full screen), in black and at most 8 other colours of the
-same palette, which 8 sprites show exactly (vic2/thumb.py); the build puts it in the .v2i.
+same palette, which 8 sprites show exactly (web/js/thumb.js); the build puts it in the .v2i.
 
 For a frame around the image on the C64, build with make FRAME=1 (v2i_frame draws it); -b
 makes sure the picture leaves room for it.
+
+Everything after reading the picture is the JavaScript the web page runs (web/js, through
+vic2/engine.py and tools/engine.mjs), so it needs Node 18 or later; this reads the
+picture and writes the PNGs.
 """
 
 import argparse
-import bisect
 import glob
 import io
 import os
 import sys
-import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from PIL import Image, ImageCms, ImageOps, PngImagePlugin
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from vic2 import engine  # noqa: E402
 
 try:
     import pillow_heif
@@ -103,51 +106,16 @@ try:
 except ImportError:
     pass
 
-# Colodore (VICE colodore.vpl) as VICE shows it with its default colour controls (brighter
-# and more saturated than the .vpl), per system; keep in sync with vic2/palette.py
-# (COLODORE_VICE_PAL/_NTSC), whose exact lookup maps these back to their indices. -P none.
-# (-P's default, tools/tv.vpl, is in vic2/palette.py too: TV_2026_11.)
-PALETTES = {
-    "pal": [
-        0x000000, 0xFFFFFF, 0xD32831, 0x58FFFF,
-        0xDB29F1, 0x3CF82B, 0x2C27FF, 0xFFFF29,
-        0xDC5404, 0x814000, 0xFF6C76, 0x595959,
-        0x969696, 0xA1FF8D, 0x7D77FF, 0xDADADA,
-    ],
-    "ntsc": [
-        0x000000, 0xFFFFFF, 0xD62933, 0x55FFFF,
-        0xDD2BF3, 0x3AF529, 0x2B27FF, 0xFFFF2B,
-        0xDD5606, 0x824100, 0xFF6E78, 0x595959,
-        0x969696, 0xA0FF8C, 0x7D77FF, 0xDADADA,
-    ],
-}
-
 # -d MODE[:PARAM] -> (default PARAM, range); fs/floydsteinberg at full strength is Pillow's
 DITHERS = {"none": None, "floydsteinberg": (1.0, (0.0, 1.0)), "fs": (1.0, (0.0, 1.0)),
            "atkinson": (1.0, (0.0, 1.0)), "hybrid": (90.0, (0.0, 442.0))}
-# error diffusion kernels: (dx, dy, share); serpentine, so dx is mirrored on odd lines
-KERNELS = {
-    "fs": [(1, 0, 7 / 16), (-1, 1, 3 / 16), (0, 1, 5 / 16), (1, 1, 1 / 16)],
-    "atkinson": [(1, 0, 1 / 8), (2, 0, 1 / 8), (-1, 1, 1 / 8), (0, 1, 1 / 8), (1, 1, 1 / 8),
-                 (0, 2, 1 / 8)],
-}
-HYBRID_CLAMP = 64       # hybrid: carried error per channel at most this
-HYBRID_SPREAD = 0.1     # hybrid: cost of mixing far apart colours when picking a cell's pair
 HYBRID_RUNS = 8         # hybrid: default -l
 TOP = 3                 # picker: default -t
-HYBRID_NEAR = 4         # hybrid: pair candidates are the cell pixels' 4 nearest colours
-SPAN_W = 24             # -l: width of a run of colours outside the cell pair (a sprite)
-
-# Pixel width / height on a 4:3 TV: square-pixel sampling rate of the TV standard over the
-# VIC-II dot clock (PAL 7.375 / 7.882 MHz, NTSC 6.136 / 8.182 MHz).
-PAR = {"pal": 0.936, "ntsc": 0.75}
 SUFFIX = {"pal": "-p", "ntsc": "-n", None: ""}
 SYSTEMS = {"both": ["pal", "ntsc"], "pal": ["pal"], "ntsc": ["ntsc"], "none": [None]}
 MAX_W, MAX_H = 320, 200
-FRAME = 16                      # -b: a cell of frame on each side
-TEXT_KEY = "vic2orious"         # PNG text chunk with the settings (see settings)
+TEXT_KEY = "vic2orious"         # PNG text chunk with the settings (web/js/img2c64.js settings)
 THUMB_KEY = "vic2orious-thumb"  # PNG text chunk with the thumbnail (vic2/thumb.py TEXT_KEY)
-MODE_MC = "multicolor"          # its "mode" line for -m (vic2/build.py reads it)
 # -P default: the screen colours are chosen for (measured from a photo of the author's TV)
 VIEW = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tv.vpl")
 
@@ -156,18 +124,6 @@ SRGB = ImageCms.createProfile("sRGB")
 # (the build's conversion cache hashes it)
 SRGB_ICC = ImageCms.ImageCmsProfile(SRGB).tobytes()
 SRGB_ICC = SRGB_ICC[:24] + bytes(12) + SRGB_ICC[36:]
-
-
-def palette(system, chroma=1.0, view=None):
-    """The system's colours (or view's: 16 (r, g, b), -P) as (r, g, b), each moved away
-    from its own grey (Rec. 601 luma) by chroma: 1 as they are, less to match pictures
-    against paler colours (-c)."""
-    out = []
-    for c in view or PALETTES[system or "pal"]:
-        rgb = c if view else ((c >> 16) & 255, (c >> 8) & 255, c & 255)
-        y = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
-        out.append(tuple(max(0, min(255, int(round(y + chroma * (v - y))))) for v in rgb))
-    return out
 
 
 def load_vpl(path):
@@ -212,200 +168,6 @@ def load(path):
     return img
 
 
-def round8(v, limit, step=8):
-    return max(step, min(limit, int(v / step + 0.5) * step))
-
-
-def target_size(w, h, system, frame=False, box=(MAX_W, MAX_H), mc=False):
-    """C64 size for a w x h picture: width stretched by 1/PAR, fitted into box (at most
-    320x200; 304x184 with frame). mc (multicolour): in wide pixels, each two screen pixels
-    wide, so half the width (multiples of 4); with system None the input's pixels are
-    taken as wide pixels already."""
-    mw, mh = box
-    if frame:
-        mw, mh = min(mw, MAX_W - FRAME), min(mh, MAX_H - FRAME)
-    if system:
-        w = w / PAR[system] / (2 if mc else 1)
-    if mc:
-        mw //= 2
-    s = min(1.0, mw / w, mh / h)
-    return round8(w * s, mw, 4 if mc else 8), round8(h * s, mh)
-
-
-def dist2(p, q):
-    return (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 + (p[2] - q[2]) ** 2
-
-
-def nearest(p, pal, cand):
-    return min(cand, key=lambda c: dist2(p, pal[c]))
-
-
-def cell_pairs(px, w, h, pal):
-    """hybrid: two colours per 8x8 cell, the pair whose mixes come closest to the cell's
-    pixels (distance to the segment between them, plus HYBRID_SPREAD times the cost of
-    mixing far apart colours, as in Yliluoma's dithering)."""
-    pairs = {}
-    for cy in range(h // 8):
-        for cx in range(w // 8):
-            cell = [px[y][x] for y in range(cy * 8, cy * 8 + 8) for x in range(cx * 8, cx * 8 + 8)]
-            near = set()
-            for p in cell:
-                near.update(sorted(range(len(pal)), key=lambda c: dist2(p, pal[c]))[:HYBRID_NEAR])
-            near = sorted(near)
-            best = None
-            for i, a in enumerate(near):
-                for b in near[i:]:
-                    A, B = pal[a], pal[b]
-                    d = [B[k] - A[k] for k in range(3)]
-                    dd = d[0] ** 2 + d[1] ** 2 + d[2] ** 2
-                    cost = 0.0
-                    for p in cell:
-                        t = 0.0 if dd == 0 else max(0.0, min(1.0, sum(
-                            (p[k] - A[k]) * d[k] for k in range(3)) / dd))
-                        cost += dist2(p, [A[k] + t * d[k] for k in range(3)])
-                        cost += HYBRID_SPREAD * dd * t * (1 - t)
-                    if best is None or cost < best[0]:
-                        best = (cost, a, b)
-            pairs[cy, cx] = best[1:]
-    return pairs
-
-
-def runs_needed(xs):
-    """Fewest SPAN_W wide runs covering the sorted xs (greedy from the left is optimal)."""
-    n, end = 0, None
-    for x in xs:
-        if end is None or x > end:
-            n, end = n + 1, x + SPAN_W - 1
-    return n
-
-
-def diffuse(img, pal, kernel, strength=1.0, clamp=None, pairs=None, escape=None, budget=None):
-    """Serpentine error diffusion: each pixel takes the nearest palette colour (with pairs,
-    the nearer of its cell's two, unless that is more than escape away: then the nearest
-    of all), and passes strength times the error on (each channel clamped to clamp).
-    With budget, a line's pixels outside their cell's pair must fit in at most budget
-    single colour runs of SPAN_W pixels (what the converter's sprites paint): a pixel
-    that would need one more takes the nearest colour that fits, its pair's if no other.
-    Returns a "P" image of palette indices."""
-    w, h = img.size
-    src = img.load()
-    buf = [[list(src[x, y]) for x in range(w)] for y in range(h)]
-    out = Image.new("P", (w, h))
-    put = out.load()
-    full = range(len(pal))
-    esc2 = None if escape is None else escape * escape
-    for y in range(h):
-        sgn = 1 if y % 2 == 0 else -1
-        extra, used = {}, {}     # colour -> sorted xs outside their pair / runs they need
-        for x in (range(w) if sgn > 0 else range(w - 1, -1, -1)):
-            p = [max(0.0, min(255.0, v)) for v in buf[y][x]]
-            pair = pairs[y // 8, x // 8] if pairs else full
-            c = nearest(p, pal, pair)
-            if pairs and dist2(p, pal[c]) > esc2:
-                if budget is None:
-                    c = nearest(p, pal, full)
-                else:
-                    for c2 in sorted(full, key=lambda c2: dist2(p, pal[c2])):
-                        if c2 in pair:
-                            c = c2
-                            break
-                        xs = extra.get(c2, [])
-                        bisect.insort(xs, x)
-                        n = runs_needed(xs)
-                        if sum(used.values()) - used.get(c2, 0) + n <= budget:
-                            extra[c2], used[c2], c = xs, n, c2
-                            break
-                        xs.remove(x)
-            q = pal[c]
-            put[x, y] = c
-            e = [(p[k] - q[k]) * strength for k in range(3)]
-            if clamp is not None:
-                e = [max(-clamp, min(clamp, v)) for v in e]
-            for dx, dy, f in KERNELS[kernel]:
-                xx, yy = x + dx * sgn, y + dy
-                if 0 <= xx < w and yy < h:
-                    row = buf[yy][xx]
-                    row[0] += e[0] * f
-                    row[1] += e[1] * f
-                    row[2] += e[2] * f
-    return out
-
-
-def convert(img, system, dither, frame=False, box=(MAX_W, MAX_H), chroma=1.0,
-            runs=HYBRID_RUNS, view=None, mc=False):
-    """dither: (mode, param) from parse_dither. Colours are chosen (and the dither's error
-    measured) against palette(system, chroma, view); the result has view's colours (or the
-    system's), without chroma. runs:
-    hybrid's budget per line (see diffuse), None for none. mc: multicolour, one output
-    pixel per wide pixel (target_size); hybrid's cells are hires cells, so not with mc."""
-    if mc and dither[0] == "hybrid":
-        raise ValueError("hybrid dithers hires cells; not with multicolour")
-    size = target_size(img.width, img.height, system, frame, box, mc)
-    if size != img.size:
-        img = img.resize(size, Image.Resampling.LANCZOS)
-    mode, k = dither
-    pal = palette(system, chroma, view)
-    if mode == "none" or (mode == "fs" and k == 1.0):
-        d = Image.Dither.NONE if mode == "none" else Image.Dither.FLOYDSTEINBERG
-        out = img.quantize(palette=palette_image(pal), dither=d)
-    elif mode == "hybrid":
-        src = img.load()
-        px = [[src[x, y] for x in range(img.width)] for y in range(img.height)]
-        out = diffuse(img, pal, "fs", clamp=HYBRID_CLAMP,
-                      pairs=cell_pairs(px, img.width, img.height, pal), escape=k, budget=runs)
-    else:
-        out = diffuse(img, pal, mode, strength=k)
-    out.putpalette(palette_image(palette(system, 1.0, view)).getpalette())
-    return out.convert("RGB")
-
-
-def settings(src, system, dither, frame=False, box=(MAX_W, MAX_H), chroma=1.0,
-             runs=HYBRID_RUNS, picked=None, view_name=None, mc=False):
-    """What convert was given, as "key: value" lines: written into the PNG (text chunk
-    TEXT_KEY), from where the build copies them into the .v2i's metadata. picked: how -w
-    chose the dither, if it did; view_name: -P's file name. mc adds "mode: multicolor"
-    (MODE_MC), which the build reads; hires pictures have no mode line."""
-    mode, k = dither
-    if mode == "none":
-        d = "none"
-    elif mode == "fs" and k == 1.0:
-        d = "floydsteinberg (Pillow's)"
-    else:
-        d = "%s:%g" % (mode, k)
-    if mode == "hybrid":
-        d += ", line runs %s, spread %g, clamp %s, pair candidates %d" % (
-            "none" if runs is None else runs, HYBRID_SPREAD,
-            "none" if HYBRID_CLAMP is None else "%g" % HYBRID_CLAMP, HYBRID_NEAR)
-    mw, mh = box
-    if frame:
-        mw, mh = min(mw, MAX_W - FRAME), min(mh, MAX_H - FRAME)
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from vic2 import VERSION
-    lines = [("quantized by", "img2c64@" + VERSION),
-             ("source", os.path.basename(src)),
-             ("aspect", "%s (pixel width %g)" % (system, PAR[system]) if system else "none"),
-             ("fit", "%dx%d%s" % (mw, mh, ", room for a frame" if frame else "")),
-             ("dither", d),
-             ("chroma", "%g" % chroma),
-             ("palette", view_name or "Colodore as VICE shows it (%s)" % (
-                 system or "pal").upper())]
-    if picked:
-        lines.insert(5, ("dither choice", picked))
-    if mc:
-        lines[3] = ("fit", lines[3][1] + " (%dx%d wide pixels)" % (mw // 2, mh))
-        lines.insert(1, ("mode", MODE_MC))
-    return "".join("%s: %s\n" % kv for kv in lines)
-
-
-def thumbnail(img, out, system, view=None, mc=False):
-    """The thumbnail of picture img, converted to out (vic2/thumb.py: 24x21 at most, as the
-    screen shows out, in up to 9 of the colours out is written in)."""
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from vic2 import thumb
-    return thumb.make(img, (out.width * (2 if mc else 1), out.height),
-                      palette(system, 1.0, view))
-
-
 def save(out, dst, text, thumb=None):
     """out as dst: tagged sRGB, with text (settings) in a tEXt chunk, and thumb (thumbnail
     bytes) hex encoded in another."""
@@ -416,72 +178,11 @@ def save(out, dst, text, thumb=None):
     out.save(dst, icc_profile=SRGB_ICC, pnginfo=info)
 
 
-def judge(img, out, system, view, mc, quick):
-    """The scores and wrong pixels of output out against picture img, as the screen shows
-    it (view, -P, or VICE's Colodore): through the converter, or with quick its estimate
-    (dither_pick.estimate, -t). Multicolour pictures are scored as they are, each pixel
-    doubled (the converter shows nearly every pixel of them, so it is not run), wrong
-    pixels None."""
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from vic2 import dither_pick
-    if mc:
-        c64, wrong = out.resize((2 * out.width, out.height), Image.Resampling.NEAREST), None
-    else:
-        c64, wrong = (dither_pick.estimate if quick else dither_pick.shown)(out, system, view)
-    r = dither_pick.scores(c64, img.resize(c64.size, Image.Resampling.LANCZOS))
-    r.update(wrong=wrong, pixels=out.width * out.height)
-    return r
-
-
-def candidate(img, system, name, dither, runs, frame, box, chroma, view=None, mc=False,
-              quick=False):
-    """One dither tried for -w: (its scores and wrong pixels, the output); quick: scored
-    by the converter's estimate (judge)."""
-    t0 = time.process_time()
-    out = convert(img, system, parse_dither(dither), frame, box, chroma, runs, view, mc)
-    r = judge(img, out, system, view, mc, quick)
-    r.update(setting=name, dither=dither, runs=runs, secs=time.process_time() - t0)
-    return r, out
-
-
-def refine(img, out, est, system, view):
-    """-t: a candidate the estimate ranked high (est, its result), through the converter."""
-    t0 = time.process_time()
-    r = judge(img, out, system, view, False, False)
-    r.update(setting=est["setting"], dither=est["dither"], runs=est["runs"],
-             secs=time.process_time() - t0)
-    return r, out
-
-
-def describe(r):
-    """A candidate's metrics, wrong pixels and CPU time, for the picker's log."""
-    wrong = ("wrong %5.1f%%" % (100.0 * r["wrong"] / r["pixels"])
-             if r["wrong"] is not None else "")
-    return "%-14s rms %6.2f  ssim %.4f  color %6.2f  %-12s cpu %5.1f s%s" % (
-        r["setting"], r["rms"], r["ssim"], r["color"], wrong, r["secs"],
-        "  (estimate)" if r.get("estimate") else "")
-
-
-def pick(futures, weights, label, extra=()):
-    """A picture's candidates ranked: (ranked results, {setting: output}), best first.
-    Logs each candidate as it finishes, then the ranking (the score is relative to the
-    others, so known only at the end), to stdout; label names the picture (and stage).
-    extra: -t's estimates of the dithers not converted, ranked along (marked "estimate"),
-    so the metrics are scaled over all the dithers as without -t (scaled over the
-    converted few alone, a near tie between two of them could go either way)."""
-    from vic2 import dither_pick
-    done = []
-    for n, f in enumerate(as_completed(futures), 1):
-        done.append(f.result())
-        print("  %s [%d/%d] %s" % (label, n, len(futures), describe(done[-1][0])),
-              flush=True)
-    outs = {r["setting"]: out for r, out in done}
-    ranked = dither_pick.rank([r for r, _ in done] + [dict(r, estimate=True) for r in extra],
-                              weights)
-    print("  %s ranked (weights rms %g, ssim %g, color %g):" % ((label,) + tuple(weights)))
-    for i, r in enumerate(ranked, 1):
-        print("    %d. score %.3f  %s" % (i, r["score"], describe(r)))
-    return ranked, outs
+def picture(w, h, idx, colours):
+    """An output as an RGB image: palette indices idx (w x h) in colours (16 (r, g, b))."""
+    out = Image.frombytes("P", (w, h), bytes(idx))
+    out.putpalette(palette_image(colours).getpalette())
+    return out.convert("RGB")
 
 
 def parse_top(v):
@@ -498,16 +199,15 @@ def parse_top(v):
 
 
 def parse_weights(v):
-    """-w RMS,SSIM,COLOR."""
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    """-w RMS,SSIM,COLOR: three numbers >= 0, not all 0."""
     try:
-        from vic2 import dither_pick
-    except ImportError as e:
-        raise argparse.ArgumentTypeError("needs the repo's vic2 package and numpy (%s)" % e)
-    try:
-        return dither_pick.parse_weights(v)
-    except ValueError as e:
-        raise argparse.ArgumentTypeError(str(e))
+        w = [float(x) for x in v.strip("{}() ").split(",")]
+    except ValueError:
+        w = []
+    if len(w) != 3 or min(w) < 0 or sum(w) == 0:
+        raise argparse.ArgumentTypeError("takes three weights >= 0, not all 0, RMS,SSIM,COLOR, "
+                                         "e.g. 0,1,1")
+    return w
 
 
 def parse_chroma(v):
@@ -539,6 +239,12 @@ def parse_dither(v):
         raise argparse.ArgumentTypeError("%s: the parameter must be above %g, at most %g"
                                          % (v, lo, hi))
     return ("fs" if mode == "floydsteinberg" else mode), k
+
+
+def check_dither(v):
+    """-d as given, once parse_dither takes it (the engine parses it the same way)."""
+    parse_dither(v)
+    return v.lower()
 
 
 def parse_size(v):
@@ -577,7 +283,7 @@ def main():
     ap.add_argument("-b", "--border", action="store_true",
                     help="leave room for the frame the build draws (make FRAME=1): fit "
                          "304x184 instead of 320x200")
-    ap.add_argument("-d", "--dither", type=parse_dither, metavar="MODE",
+    ap.add_argument("-d", "--dither", type=check_dither, metavar="MODE",
                     help="floydsteinberg (fs[:K]), atkinson[:K], hybrid[:E] or none; "
                          "default: pick per picture (see -w)")
     ap.add_argument("-w", "--weights", type=parse_weights, metavar="R,S,C",
@@ -608,10 +314,10 @@ def main():
     a = ap.parse_args()
     if a.dither and a.weights:
         ap.error("-w picks the dither; leave out -d")
-    if a.multicolor and a.dither and a.dither[0] == "hybrid":
+    if a.multicolor and a.dither and parse_dither(a.dither)[0] == "hybrid":
         ap.error("-d hybrid works on hires cells; not with -m")
     if a.line_runs is not None:
-        if not a.dither or a.dither[0] != "hybrid":
+        if not a.dither or parse_dither(a.dither)[0] != "hybrid":
             ap.error("-l needs -d hybrid")
         if a.line_runs == "none":
             a.line_runs = None
@@ -651,63 +357,28 @@ def main():
             imgs[src] = load(src)
         except (OSError, Image.UnidentifiedImageError) as e:
             raise SystemExit("img2c64: %s" % e)
-    pool = tried = None
-    if not a.dither:
-        weights = a.weights or parse_weights("0,1,1")
-        from vic2 import dither_pick
-        pool = ProcessPoolExecutor()
-        # every candidate of every picture at once, so the pool stays busy
-        cands = [c for c in dither_pick.CANDIDATES
-                 if not (a.multicolor and c[1].startswith("hybrid"))]
-        # -t: estimate every dither first, the converter only for the best few
-        quick = not a.multicolor and a.top is not None and a.top < len(cands)
-        tried = [[pool.submit(candidate, imgs[src], system, name, d, runs, a.border, a.size,
-                              a.chroma, view, a.multicolor, quick) for name, d, runs in cands]
-                 for src, _, system in jobs]
+    srcs = list(imgs)
+
+    def done(i, w, h, idx, text, thumb, colours, note):
+        src, dst, system = jobs[i]
+        save(picture(w, h, idx, colours), dst, text, thumb)
+        print("%s -> %s (%dx%d%s%s)%s" % (src, dst, w, h, " wide pixels" if a.multicolor else "",
+                                        ", " + system.upper() if system else "", note),
+              flush=True)
+
+    # the work is the JavaScript of web/js (vic2/engine.py): fit, dither or pick one,
+    # thumbnail; every dither of every picture at once in worker threads
     try:
-        if tried and quick:
-            for i, (src, dst, system) in enumerate(jobs):
-                print("%s%s: estimating %d dithers, converting the best %d" % (
-                    src, ", " + system.upper() if system else "", len(cands), a.top),
-                    flush=True)
-                ranked, outs = pick(tried[i], weights, os.path.basename(dst) + " estimate")
-                tried[i] = ([pool.submit(refine, imgs[src], outs[r["setting"]], r, system,
-                                         view) for r in ranked[:a.top]], ranked[a.top:])
-        for i, (src, dst, system) in enumerate(jobs):
-            note = ""
-            if tried:
-                print("%s%s: %s %d dithers" % (
-                    src, ", " + system.upper() if system else "",
-                    "converting" if quick else "trying", a.top if quick else len(cands)),
-                    flush=True)
-                futs, extra = tried[i] if quick else (tried[i], ())
-                ranked, outs = pick(futs, weights, os.path.basename(dst), extra)
-                ranked = [r for r in ranked if not r.get("estimate")]
-                best, out = ranked[0], outs[ranked[0]["setting"]]
-                dither, runs = parse_dither(best["dither"]), best["runs"]
-                picked = ("picked by img2c64 from %d dithers%s (weights rms %g, ssim %g, "
-                          "color %g): %s" % ((len(cands), " (the best %d by estimate "
-                                              "converted)" % a.top if quick else "")
-                                             + tuple(weights) + (
-                              ", ".join("%s %.2f" % (r["setting"], r["score"])
-                                        for r in ranked[:3]),)))
-                note = "; dither %s" % best["setting"] + (" (next: %s)" % ", ".join(
-                    "%s %.2f" % (r["setting"], r["score"]) for r in ranked[1:3])
-                    if len(ranked) > 1 else "")
-            else:
-                dither, runs, picked = a.dither, a.line_runs, None
-                out = convert(imgs[src], system, dither, a.border, a.size, a.chroma, runs,
-                              view, a.multicolor)
-            save(out, dst, settings(src, system, dither, a.border, a.size, a.chroma, runs,
-                                    picked, view_name, a.multicolor),
-                 thumbnail(imgs[src], out, system, view, a.multicolor))
-            print("%s -> %s (%dx%d%s%s)%s" % (src, dst, out.width, out.height,
-                                            " wide pixels" if a.multicolor else "",
-                                            ", " + system.upper() if system else "", note),
-                  flush=True)
-    finally:
-        if pool:
-            pool.shutdown(cancel_futures=True)
+        engine.img2c64(
+            [(src, os.path.basename(src), os.path.basename(dst), system, srcs.index(src))
+             for src, dst, system in jobs],
+            [imgs[src] for src in srcs],
+            dict(dither=a.dither, runs=a.line_runs, weights=a.weights or [0.0, 1.0, 1.0],
+                 top=a.top, chroma=a.chroma, view=view and [list(c) for c in view],
+                 viewName=view_name, mc=a.multicolor, frame=a.border, box=list(a.size)),
+            log=lambda m: print(m, flush=True), on_result=done)
+    except engine.EngineError as e:
+        raise SystemExit("img2c64: %s" % e)
     return 0
 
 

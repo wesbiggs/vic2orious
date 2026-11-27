@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vic2orious</title>
+<meta name="description" content="Turn a picture into a Commodore 64 program with more colour than its graphics modes allow: a bitmap with sprites recoloured on every line, for PAL and NTSC, made in your browser.">
+<link rel="stylesheet" href="style.css">
+<script type="module" src="js/app.js"></script>
+</head>
+<body>
+<main>
+  <header>
+    <h1>vic2orious</h1>
+    <p class="lede">Turn a picture into a C64 program with more colour than the C64's
+      graphics modes allow. Drop a photo and get a PRG that shows it on a real Commodore 64
+      or in an emulator, PAL or NTSC.</p>
+    <p class="intro">Most C64 picture converters work within the screen's own modes: two colours in each
+      8×8 cell in hires, four in multicolour, so wherever a cell's pixels want more, the
+      detail goes to the nearest pair or four. vic2orious keeps the bitmap and adds the
+      colours that don't fit with the C64's eight sprites, moved and recoloured on every
+      line as the screen is drawn, and it chooses each cell's own colours with what the
+      sprites can cover in mind. It then tries several dithers on your picture, including
+      ones made to leave the sprites less to place, and keeps the one whose C64 version
+      comes closest to the original, separately for PAL and NTSC. Where a line needs more
+      than the sprites can give, a few pixels take a nearby colour, and the page says how
+      many.</p>
+  </header>
+
+  <section class="input">
+    <label id="drop" class="drop" for="file">
+      <input id="file" type="file" accept="image/*">
+      <span id="picked" class="picked" hidden>
+        <canvas id="thumb" width="1" height="1" aria-hidden="true"></canvas>
+        <span><span id="picked-name" class="picked-name"></span>
+          <span id="picked-size" class="drop-sub"></span></span>
+      </span>
+      <span id="drop-main" class="drop-main">Drop a picture here, or choose one</span>
+      <span class="drop-sub">JPEG, PNG, WebP, GIF; HEIC where your browser reads it.
+        It stays on your computer: the conversion runs in this page.</span>
+    </label>
+
+    <form id="options" class="options">
+      <fieldset>
+        <legend>Mode</legend>
+        <label><input type="radio" name="mode" value="hires" checked> Hires
+          <small>320 pixels across, two colours per 8×8 cell, sprites for the rest</small></label>
+        <label><input type="radio" name="mode" value="mc"> Multicolour
+          <small>160 wide pixels, four colours per cell; quicker, softer</small></label>
+      </fieldset>
+      <label class="dither">Dither
+        <select name="dither">
+          <option value="" selected>Best of several (slower)</option>
+          <option value="none">None</option>
+          <option value="fs">Floyd-Steinberg</option>
+          <option value="fs:0.75">Floyd-Steinberg, 75%</option>
+          <option value="fs:0.5">Floyd-Steinberg, 50%</option>
+          <option value="atkinson">Atkinson</option>
+          <option value="atkinson:0.75">Atkinson, 75%</option>
+          <option value="hybrid" data-hires>Hybrid (hires only)</option>
+        </select>
+      </label>
+      <details id="advanced" class="advanced">
+        <summary>Advanced settings</summary>
+        <div class="advanced-body">
+          <label class="chroma">Colour matching <output id="chroma-value">1.00</output>
+            <input type="range" name="chroma" min="0.5" max="1.5" step="0.05" value="1">
+            <small>Lower uses more colour, higher more greys</small>
+          </label>
+          <fieldset>
+            <legend>Largest size</legend>
+            <span class="pair">
+              <label>Width <input type="number" name="maxw" min="8" max="320" step="8" value="320"></label>
+              <label>Height <input type="number" name="maxh" min="8" max="200" step="8" value="200"></label>
+            </span>
+            <small>Screen pixels, in steps of 8. The picture keeps its shape inside them.</small>
+          </fieldset>
+          <fieldset>
+            <legend>Aspect</legend>
+            <label><input type="radio" name="aspect" value="system" checked> PAL and NTSC
+              <small>Stretched so it keeps its shape on each system's screen</small></label>
+            <label><input type="radio" name="aspect" value="none"> None
+              <small>The picture's pixels as they are, for pictures made at C64 size:
+                320×200 in hires, 160×200 in multicolour (one pixel for each wide pixel),
+                or a multiple of either</small></label>
+          </fieldset>
+          <fieldset>
+            <legend>Screen position</legend>
+            <label><input type="radio" name="place" value="centre" checked> Centred</label>
+            <span class="pair">
+              <label><input type="radio" name="place" value="at"> At column</label>
+              <input type="number" name="col" min="0" max="39" value="0" aria-label="Column">
+              <label for="row">row</label>
+              <input type="number" id="row" name="row" min="0" max="24" value="0">
+            </span>
+            <small>In 8×8 cells from the top left. A picture that would run off the screen
+              moves in until it fits.</small>
+          </fieldset>
+          <label class="check"><input type="checkbox" name="bare"> Leave out the thumbnail and metadata
+            <small>The smallest .v2i, for a game or a demo that only shows the picture</small></label>
+        </div>
+      </details>
+      <button id="again" type="submit" hidden>Convert again</button>
+    </form>
+  </section>
+
+  <section id="work" class="work" hidden>
+    <p id="status" class="status" aria-live="polite"></p>
+    <progress id="progress" max="1" value="0"></progress>
+  </section>
+
+  <section id="result" class="result" hidden>
+    <div class="tabs" role="tablist">
+      <button role="tab" data-system="pal" aria-selected="true">PAL</button>
+      <button role="tab" data-system="ntsc" aria-selected="false">NTSC</button>
+    </div>
+    <div id="stage" class="stage">
+      <div id="frame" class="frame">
+        <canvas id="screen" width="1280" height="800" aria-label="The picture as the C64 shows it"></canvas>
+        <div id="curtain-line" class="curtain-line" aria-hidden="true"></div>
+        <div id="curtain" class="curtain" role="slider" tabindex="0"
+          aria-label="Curtain: the original picture over the C64 one"
+          aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span aria-hidden="true">◂▸</span></div>
+      </div>
+    </div>
+    <div class="screen-tools">
+      <span class="hint">Drag across the picture to draw the original over it.</span>
+      <button id="full" type="button">Full screen</button>
+      <button id="png" type="button">Save as PNG</button>
+    </div>
+    <p id="stats" class="stats"></p>
+    <p class="download"><a id="prg" class="button" download>Download</a>
+      <span class="files">or the images alone for vic2orious's players:
+        <a id="v2i-pal" download>PAL .v2i</a>, <a id="v2i-ntsc" download>NTSC .v2i</a></span></p>
+    <details>
+      <summary>Running it</summary>
+      <p>In VICE, drag the PRG onto the window. On a C64, copy it to a disk or an SD card
+        device and type <code>LOAD"NAME",8</code> then <code>RUN</code>. The program
+        picks the PAL or NTSC version for the machine. Press space to go back to BASIC.</p>
+    </details>
+    <details id="every-box">
+      <summary>Compare the dithers</summary>
+      <p>Every dither below was tried on your picture and scored on how close the C64's
+        version comes to the original, and the page shows its pick. <b>Use this</b> converts
+        another one for PAL and NTSC, to show above and download instead.</p>
+      <p id="every-status" class="every-status" aria-live="polite"></p>
+      <div class="every-bar">
+        <span class="seg" id="every-view" role="group" aria-label="Show">
+          <button type="button" data-view="quantised" aria-pressed="true">Dithered</button>
+          <button type="button" data-view="estimate" aria-pressed="false"
+            title="In hires, the quick estimate the scores start from">Estimate</button>
+        </span>
+      </div>
+      <div id="grid" class="grid"></div>
+      <details class="figures">
+        <summary>How the scores work</summary>
+        <p class="hint">SSIM compares structure (higher is closer); colour is the a*b*
+          colour error and RMS the blurred error (lower is closer); nearby is the share of
+          pixels the C64 cannot show exactly and draws in a nearby colour. The score weighs
+          them against each other, 1 being the best of these dithers. In hires a quick
+          estimate (each cell's two commonest colours, 8 sprite spans a line, no timing)
+          scores all of them, and the best three by it are converted in full and scored
+          again, below; the page shows the best of those. Changing the weights scores them
+          again, and Convert again picks with them.</p>
+        <span class="weights" id="weights">Weights
+          <label>RMS <input type="number" name="w0" value="0" min="0" step="0.5"></label>
+          <label>SSIM <input type="number" name="w1" value="1" min="0" step="0.5"></label>
+          <label>Colour <input type="number" name="w2" value="1" min="0" step="0.5"></label>
+        </span>
+        <h3 id="converted-head">Converted in full</h3>
+        <table id="ranking"></table>
+      </details>
+    </details>
+  </section>
+
+  <section class="about">
+    <h2>How it works</h2>
+    <p>The picture is a hires bitmap, which allows two colours in each 8×8 cell. The pixels
+      that do not fit are drawn with sprites that are moved and recoloured line by line as
+      the screen is drawn: sprite rasterisation, worked out by the demo scene long ago. A
+      raster routine made for each picture does the moving, timed to the cycle for PAL or
+      NTSC, and the PRG holds both versions.</p>
+    <p>vic2orious is an AI-assisted project, written with Claude; I would not have got all
+      the fiddly timing right without it. The ideas stand on the shoulders of the demo
+      scene. Source and command-line tools:
+      <a href="https://github.com/wesbiggs/vic2orious">github.com/wesbiggs/vic2orious</a>.</p>
+  </section>
+</main>
+</body>
+</html>
