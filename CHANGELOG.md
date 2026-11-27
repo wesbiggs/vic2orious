@@ -2,7 +2,14 @@
 
 Turn any picture into a C64 hires or multicolour bitmap with multiplexed sprites, played by a cycle-exact kernel on PAL and NTSC, plus a proportional text library and demos.
 
+## Unreleased
+
+### Changed
+- **One engine:** the converter, the `.v2i` packing, img2c64's dithers and dither picker and the thumbnails are now JavaScript (`web/js`), shared by the page and the Python tools, which run it in Node (`tools/engine.mjs`, no npm packages). The tools need **Node.js 18 or later**. Python still reads pictures, writes the PNGs and does the build, texts, fonts, cc65, disks and the VICE checks. img2c64 and the build give byte-identical results to the Python they replace, apart from the metadata's date.
+
 ## 0.2.0
+
+The drag-and-drop page runs a JavaScript port of the converter in the browser; the command-line tools still use the Python original.
 
 ### New
 - **Drag-and-drop page:** https://wesbiggs.github.io/vic2orious/ turns a picture into a PRG in the browser, with nothing to install: drop or choose a picture, hires by default or multicolour, the dither picked for each system unless one is chosen. The result is drawn as the C64 shows it (PAL or NTSC, at its pixel aspect), with the PRG and both `.v2i` to download. The original can be dragged across it as a curtain; Full screen and Save as PNG; Compare the dithers shows every dither tried with its scores, and Use this converts with another one. Advanced settings has colour matching (`-c`), the largest size (`-s`), the screen position (as `--at`), the aspect (PAL and NTSC, or None for pictures made at C64 size) and a bare `.v2i` without thumbnail and metadata. The work runs in web workers, and the page makes the same bytes as `vic2.prg` apart from the dates. `web/README.md` says how to serve it and run its checks; `.github/workflows/pages.yml` publishes it from main.
@@ -14,7 +21,6 @@ Turn any picture into a C64 hires or multicolour bitmap with multiplexed sprites
 - **CI and releases:** GitHub Actions builds everything and verifies it pixel for pixel in a headless VICE on pushes to main and pull requests; a `v*` tag publishes the dual disk, PAL and NTSC programs and the libraries. `VICE_DATA` points the build at VICE's data directory on any system.
 
 ### Changed
-- **One engine:** the converter, the `.v2i` packing, img2c64's dithers and dither picker and the thumbnails are now JavaScript (`web/js`), shared by the page and the Python tools, which run it in Node (`tools/engine.mjs`, no npm packages). The tools need **Node.js 18 or later**. Python still reads pictures, writes the PNGs and does the build, texts, fonts, cc65, disks and the VICE checks. img2c64 and the build give byte-identical results to the Python they replace, apart from the metadata's date.
 - **Dither picker:** logs each dither's scores, and a quick estimate of the converter ranks them first so only the best 3 are converted (`-t N`, `-t all` for every one).
 - **One picture, one PRG:** `vic2.prg` also takes built `.v2i` files with their texts (`make prg PIC='x.v2i x.v2t'`): one image, or a PAL and an NTSC one in a dual PRG.
 - **Whitespace in stories:** extra blank lines, indents and runs of spaces in `.txt`/`.ask` text are kept; a no-break space joins words.
